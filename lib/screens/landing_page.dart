@@ -88,6 +88,8 @@ class _LandingPageState extends State<LandingPage>
             end: Alignment.bottomRight,
             stops: [0.0, 0.4, 1.0],
             colors: [
+              AppColors.pastelBlue.withOpacity(0.3),
+              AppColors.pastelYellow.withOpacity(0.3),
               Color(0xFFBDD8F5), // soft blue top-left
               Color(0xFFE8EEF8), // pale mid
               Color(0xFFFAEFA0), // warm yellow bottom-right
@@ -95,6 +97,124 @@ class _LandingPageState extends State<LandingPage>
           ),
         ),
         child: SafeArea(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              // Logo section with animation
+              Expanded(
+                flex: 1,
+                child: SlideTransition(
+                  position: _logoPosition,
+                  child: ScaleTransition(
+                    scale: _logoScale,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          width: 120,
+                          height: 120,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: const LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                AppColors.deepYellow,
+                                AppColors.softYellow,
+                              ],
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: AppColors.deepYellow.withOpacity(0.3),
+                                blurRadius: 20,
+                                offset: const Offset(0, 10),
+                              ),
+                            ],
+                          ),
+                          child: Center(
+                            child: Text(
+                              '💊',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .displayLarge
+                                  ?.copyWith(fontSize: 60),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        Text(
+                          'PillPal',
+                          style: Theme.of(context)
+                              .textTheme
+                              .displaySmall
+                              ?.copyWith(
+                                color: AppColors.darkText,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 32,
+                                letterSpacing: 1.2,
+                              ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Your Medication Companion',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodyLarge
+                              ?.copyWith(
+                                color: AppColors.mediumText,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              // Login options section with animation
+              FadeTransition(
+                opacity: _cardsOpacity,
+                child: Padding(
+                  padding:
+                      const EdgeInsets.only(left: 24, right: 24, bottom: 40),
+                  child: Column(
+                    children: [
+                      Text(
+                        'How would you like to continue?',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              color: AppColors.darkText,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 18,
+                            ),
+                      ),
+                      const SizedBox(height: 24),
+                      // Caregiver Portal Card
+                      _buildPortalCard(
+                        context,
+                        icon: '👨‍⚕️',
+                        title: 'Caregiver Portal',
+                        subtitle: 'Monitor and manage care',
+                        bgColor: AppColors.softBlue,
+                        accentColor: AppColors.deepBlue,
+                        onTap: () {
+                          _navigateTo(context, 'caregiver');
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      // User/Elderly Portal Card
+                      _buildPortalCard(
+                        context,
+                        icon: '👴',
+                        title: 'Patient Portal',
+                        subtitle: 'Track your medications',
+                        bgColor: AppColors.softYellow,
+                        accentColor: AppColors.deepYellow,
+                        onTap: () {
+                          _navigateTo(context, 'patient');
+                        },
+                      ),
+                    ],
           child: AnimatedBuilder(
             animation: Listenable.merge([_logoController, _contentController]),
             builder: (context, child) {
@@ -276,11 +396,16 @@ class _LandingPageState extends State<LandingPage>
             color: Colors.white.withValues(alpha: 0.75),
             borderRadius: BorderRadius.circular(24),
             border: Border.all(
+              color: accentColor.withOpacity(0.3),
+              width: 2,
               color: Colors.white.withValues(alpha: 0.9),
               width: 1.5,
             ),
             boxShadow: [
               BoxShadow(
+                color: accentColor.withOpacity(0.15),
+                blurRadius: 15,
+                offset: const Offset(0, 8),
                 color: Colors.black.withValues(alpha: 0.05),
                 blurRadius: 20,
                 offset: const Offset(0, 6),
@@ -299,6 +424,36 @@ class _LandingPageState extends State<LandingPage>
                 width: 68,
                 height: 68,
                 decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: accentColor.withOpacity(0.15),
+                ),
+                child: Center(
+                  child: Text(
+                    icon,
+                    style: const TextStyle(fontSize: 32),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: AppColors.darkText,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18,
+                          ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: AppColors.mediumText,
+                            fontSize: 14,
+                          ),
                   color: iconBgColor,
                   borderRadius: BorderRadius.circular(18),
                   boxShadow: [
@@ -308,6 +463,14 @@ class _LandingPageState extends State<LandingPage>
                       offset: const Offset(0, 4),
                     ),
                   ],
+                ),
+              ),
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                color: accentColor.withOpacity(0.2),
                 ),
                 child: Icon(
                   icon,
