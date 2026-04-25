@@ -4,6 +4,9 @@ import 'package:provider/provider.dart';
 
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/signup_screen.dart';
+import 'screens/dashboard/dashboard_left_screen.dart';
+import 'screens/dashboard/dashboard_right_screen.dart';
+import 'screens/dashboard/dashboard_screen.dart';
 import 'screens/role/landing_page.dart';
 import 'screens/reminder/reminder_screen.dart';
 import 'screens/shell/home_shell.dart';
@@ -19,14 +22,20 @@ final appRouter = GoRouter(
       if (!session.bootstrapped) return null;
 
       final isLoggingIn = state.matchedLocation == '/login' || state.matchedLocation == '/signup';
-      final isPublic = state.matchedLocation == '/' || isLoggingIn || state.matchedLocation == '/reminder';
+      // For now, dashboard is public (no credentials required yet).
+      final isPublic = state.matchedLocation == '/' ||
+          isLoggingIn ||
+          state.matchedLocation == '/reminder' ||
+          state.matchedLocation == '/dashboard' ||
+          state.matchedLocation == '/dashboard/left' ||
+          state.matchedLocation == '/dashboard/right';
 
       if (!session.isAuthed && !isPublic) {
         return '/login';
       }
 
       if (session.isAuthed && isLoggingIn) {
-        return '/home';
+        return '/dashboard';
       }
       return null;
     },
@@ -42,6 +51,18 @@ final appRouter = GoRouter(
       GoRoute(
         path: '/signup',
         builder: (context, state) => const SignupScreen(),
+      ),
+      GoRoute(
+        path: '/dashboard',
+        builder: (context, state) => const DashboardScreen(),
+      ),
+      GoRoute(
+        path: '/dashboard/left',
+        builder: (context, state) => const DashboardLeftScreen(),
+      ),
+      GoRoute(
+        path: '/dashboard/right',
+        builder: (context, state) => const DashboardRightScreen(),
       ),
       GoRoute(
         path: '/home',

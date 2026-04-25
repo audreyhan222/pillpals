@@ -1,13 +1,6 @@
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
-import 'package:provider/provider.dart';
-
-import '../../api/api_client.dart';
-import '../../api/endpoints.dart';
-import '../../config/app_config.dart';
-import '../../state/session_store.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -20,9 +13,7 @@ class _LoginScreenState extends State<LoginScreen>
     with SingleTickerProviderStateMixin {
   final _email = TextEditingController();
   final _password = TextEditingController();
-  bool _loading = false;
   bool _obscurePassword = true;
-  String? _error;
 
   late final AnimationController _controller;
   late final Animation<double> _opacity;
@@ -52,30 +43,9 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Future<void> _submit() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    final session = context.read<SessionStore>();
-    try {
-      final api = ApiClient(baseUrl: AppConfig.apiBaseUrl);
-      final res = await api.dio.post(ApiEndpoints.login, data: {
-        'email': _email.text.trim(),
-        'password': _password.text,
-      });
-      final token =
-          (res.data as Map<String, dynamic>)['access_token'] as String?;
-      if (token == null || token.isEmpty) throw Exception('Missing token');
-      await session.setToken(token);
-      if (!mounted) return;
-      context.go('/role');
-    } on DioException catch (e) {
-      setState(() => _error = e.response?.data.toString() ?? e.message);
-    } catch (e) {
-      setState(() => _error = e.toString());
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
+    // MVP: no credentials required yet — jump straight to the dashboard.
+    HapticFeedback.lightImpact();
+    context.go('/dashboard');
   }
 
   @override
@@ -273,7 +243,7 @@ class _LoginScreenState extends State<LoginScreen>
                               accentColor: const Color(0xFF4A90D9),
                               obscureText: _obscurePassword,
                               textInputAction: TextInputAction.done,
-                              onSubmitted: (_) => _loading ? null : _submit(),
+                              onSubmitted: (_) => _submit(),
                               suffixIcon: GestureDetector(
                                 onTap: () => setState(
                                   () => _obscurePassword = !_obscurePassword,
@@ -314,49 +284,10 @@ class _LoginScreenState extends State<LoginScreen>
 
                             const SizedBox(height: 20),
 
-                            // Error message
-                            if (_error != null) ...[
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 14,
-                                  vertical: 10,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFFFEDED),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: const Color(0xFFFFB3B3),
-                                    width: 1,
-                                  ),
-                                ),
-                                child: Row(
-                                  children: [
-                                    const Icon(
-                                      Icons.error_outline_rounded,
-                                      color: Color(0xFFE53935),
-                                      size: 16,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(
-                                        _error!,
-                                        style: const TextStyle(
-                                          color: Color(0xFFE53935),
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(height: 16),
-                            ],
-
                             // Sign in button
                             _GradientButton(
-                              label: _loading ? 'Signing in…' : 'Sign in',
-                              enabled: !_loading,
+                              label: 'Sign in',
+                              enabled: true,
                               gradient: const LinearGradient(
                                 begin: Alignment.topLeft,
                                 end: Alignment.bottomRight,
@@ -367,21 +298,21 @@ class _LoginScreenState extends State<LoginScreen>
                               ),
                               shadowColor:
                                   const Color(0xFF4A90D9).withValues(alpha: 0.35),
-                              onTap: _loading ? null : _submit,
+                              onTap: _submit,
                             ),
 
                             const SizedBox(height: 14),
 
                             // Divider
-                            Row(
+                            const Row(
                               children: [
-                                const Expanded(
+                                Expanded(
                                   child: Divider(
                                     color: Color(0xFFDDE3EE),
                                     thickness: 1,
                                   ),
                                 ),
-                                const Padding(
+                                Padding(
                                   padding:
                                       EdgeInsets.symmetric(horizontal: 12),
                                   child: Text(
@@ -392,7 +323,7 @@ class _LoginScreenState extends State<LoginScreen>
                                     ),
                                   ),
                                 ),
-                                const Expanded(
+                                Expanded(
                                   child: Divider(
                                     color: Color(0xFFDDE3EE),
                                     thickness: 1,
@@ -405,12 +336,10 @@ class _LoginScreenState extends State<LoginScreen>
 
                             // Create account
                             GestureDetector(
-                              onTap: _loading
-                                  ? null
-                                  : () {
-                                      HapticFeedback.lightImpact();
-                                      context.go('/signup');
-                                    },
+                              onTap: () {
+                                HapticFeedback.lightImpact();
+                                context.go('/signup');
+                              },
                               child: Container(
                                 padding:
                                     const EdgeInsets.symmetric(vertical: 14),
