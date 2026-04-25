@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'app.dart';
+import 'notifications/notification_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,6 +23,6 @@ Future<void> main() async {
   } catch (e) {
     debugPrint('Firebase initialization failed: $e');
   }
-
+  await NotificationService.instance.init();
   runApp(const PillPalsApp());
 }

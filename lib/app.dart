@@ -15,7 +15,7 @@ class PillPalsApp extends StatelessWidget {
       child: MaterialApp.router(
         title: 'PillPals',
         theme: AppTheme.light(),
-        routerConfig: buildRouter(),
+        routerConfig: appRouter,
       ),
     );
   }

@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../../api/api_client.dart';
 import '../../api/endpoints.dart';
+import '../../config/app_config.dart';
 import '../../state/session_store.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -34,7 +35,7 @@ class _LoginScreenState extends State<LoginScreen> {
     });
     final session = context.read<SessionStore>();
     try {
-      final api = ApiClient(baseUrl: 'http://localhost:8000');
+      final api = ApiClient(baseUrl: AppConfig.apiBaseUrl);
       final res = await api.dio.post(ApiEndpoints.login, data: {
         'email': _email.text.trim(),
         'password': _password.text,

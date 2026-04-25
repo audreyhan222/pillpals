@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import '../theme/app_colors.dart';
-import 'portal_login_page.dart';
+import 'package:go_router/go_router.dart';
 
 class LandingPage extends StatefulWidget {
   const LandingPage({super.key});
@@ -223,13 +222,7 @@ class _LandingPageState extends State<LandingPage>
             iconBgColor: const Color(0xFFF5B731),
             label: 'I Take Medicine',
             onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => const PortalLoginPage(
-                    portalType: PortalType.patient,
-                  ),
-                ),
-              );
+              context.go('/login?role=elderly');
             },
           ),
           const SizedBox(height: 16),
@@ -241,13 +234,7 @@ class _LandingPageState extends State<LandingPage>
             iconBgColor: const Color(0xFF9FC8EE),
             label: "I'm a Caregiver",
             onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => const PortalLoginPage(
-                    portalType: PortalType.caregiver,
-                  ),
-                ),
-              );
+              context.go('/login?role=caregiver');
             },
           ),
         ],
@@ -267,26 +254,26 @@ class _LandingPageState extends State<LandingPage>
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(24),
-        splashColor: iconBgColor.withOpacity(0.15),
-        highlightColor: iconBgColor.withOpacity(0.08),
+        splashColor: iconBgColor.withValues(alpha: 0.15),
+        highlightColor: iconBgColor.withValues(alpha: 0.08),
         child: Container(
           width: double.infinity,
           padding: const EdgeInsets.symmetric(vertical: 28),
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.75),
+            color: Colors.white.withValues(alpha: 0.75),
             borderRadius: BorderRadius.circular(24),
             border: Border.all(
-              color: Colors.white.withOpacity(0.9),
+              color: Colors.white.withValues(alpha: 0.9),
               width: 1.5,
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
+                color: Colors.black.withValues(alpha: 0.05),
                 blurRadius: 20,
                 offset: const Offset(0, 6),
               ),
               BoxShadow(
-                color: Colors.white.withOpacity(0.8),
+                color: Colors.white.withValues(alpha: 0.8),
                 blurRadius: 0,
                 offset: const Offset(0, -1),
               ),
@@ -303,7 +290,7 @@ class _LandingPageState extends State<LandingPage>
                   borderRadius: BorderRadius.circular(18),
                   boxShadow: [
                     BoxShadow(
-                      color: iconBgColor.withOpacity(0.4),
+                      color: iconBgColor.withValues(alpha: 0.4),
                       blurRadius: 12,
                       offset: const Offset(0, 4),
                     ),
