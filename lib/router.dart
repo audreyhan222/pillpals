@@ -4,9 +4,8 @@ import 'package:provider/provider.dart';
 
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/signup_screen.dart';
-import 'screens/landing_page.dart';
+import 'screens/role/landing_page.dart';
 import 'screens/reminder/reminder_screen.dart';
-import 'screens/role/role_select_screen.dart';
 import 'screens/shell/home_shell.dart';
 import 'state/session_store.dart';
 
@@ -43,10 +42,6 @@ final appRouter = GoRouter(
       GoRoute(
         path: '/signup',
         builder: (context, state) => const SignupScreen(),
-      ),
-      GoRoute(
-        path: '/role',
-        builder: (context, state) => const RoleSelectScreen(),
       ),
       GoRoute(
         path: '/home',

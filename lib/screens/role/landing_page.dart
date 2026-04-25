@@ -1,8 +1,8 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../theme/app_colors.dart';
-import 'portal_login_page.dart';
+import '../../theme/app_colors.dart';
+import '../auth/login_screen.dart';
 import 'package:go_router/go_router.dart';
 
 class LandingPage extends StatefulWidget {
