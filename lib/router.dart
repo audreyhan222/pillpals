@@ -2,7 +2,8 @@ import 'package:go_router/go_router.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import 'screens/auth/login_screen.dart';
+import 'screens/auth/caregiver_login_screen.dart';
+import 'screens/auth/elderly_login_screen.dart';
 import 'screens/auth/signup_screen.dart';
 import 'screens/dashboard/dashboard_left_screen.dart';
 import 'screens/dashboard/dashboard_right_screen.dart';
@@ -11,6 +12,8 @@ import 'screens/role/landing_page.dart';
 import 'screens/role/role_select_screen.dart';
 import 'screens/reminder/reminder_screen.dart';
 import 'screens/shell/home_shell.dart';
+import 'screens/caregiver/caregiver_elderly_selection_screen.dart';
+import 'screens/caregiver/caregiver_elderly_detail_screen.dart';
 import 'state/session_store.dart';
 import 'camera/pill_bottle_camera_page.dart';
 import 'camera/scan_medication_analysis_screen.dart';
@@ -24,7 +27,10 @@ final appRouter = GoRouter(
       final session = context.read<SessionStore>();
       if (!session.bootstrapped) return null;
 
-      final isLoggingIn = state.matchedLocation == '/login' || state.matchedLocation == '/signup';
+      final isLoggingIn = state.matchedLocation == '/login' ||
+          state.matchedLocation == '/login/elderly' ||
+          state.matchedLocation == '/login/caregiver' ||
+          state.matchedLocation == '/signup';
       final isRolePick = state.matchedLocation == '/role';
       // For now, dashboard is public (no credentials required yet).
       final isPublic = state.matchedLocation == '/' ||
@@ -53,7 +59,15 @@ final appRouter = GoRouter(
       ),
       GoRoute(
         path: '/login',
-        builder: (context, state) => const LoginScreen(),
+        builder: (context, state) => const ElderlyLoginScreen(),
+      ),
+      GoRoute(
+        path: '/login/elderly',
+        builder: (context, state) => const ElderlyLoginScreen(),
+      ),
+      GoRoute(
+        path: '/login/caregiver',
+        builder: (context, state) => const CaregiverLoginScreen(),
       ),
       GoRoute(
         path: '/signup',
@@ -98,6 +112,19 @@ final appRouter = GoRouter(
           }
           return ScanMedicationAnalysisScreen(input: input);
         },
+      ),
+      GoRoute(
+        path: '/caregiver',
+        builder: (context, state) => const CaregiverElderlySelectionScreen(),
+        routes: [
+          GoRoute(
+            path: 'elderly/:id',
+            builder: (context, state) {
+              final id = state.pathParameters['id'] ?? '';
+              return CaregiverElderlyDetailScreen(elderlyId: id);
+            },
+          ),
+        ],
       ),
     ],
   );

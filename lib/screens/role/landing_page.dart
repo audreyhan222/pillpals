@@ -356,7 +356,7 @@ class _LandingPageState extends State<LandingPage>
             label: 'I Take Medicine',
             sublabel: 'Track & confirm your doses',
             onTap: () {
-              context.go('/login?role=elderly');
+              context.go('/login/elderly');
             },
           ),
 
@@ -374,7 +374,7 @@ class _LandingPageState extends State<LandingPage>
             label: "I'm a Caregiver",
             sublabel: 'Monitor & get missed-dose alerts',
             onTap: () {
-              context.go('/login?role=caregiver');
+              context.go('/login/caregiver');
             },
           ),
 
