@@ -17,6 +17,7 @@ import 'screens/caregiver/caregiver_elderly_detail_screen.dart';
 import 'state/session_store.dart';
 import 'camera/pill_bottle_camera_page.dart';
 import 'camera/scan_medication_analysis_screen.dart';
+import 'pals/pals_gallery_page.dart';
 
 final rootNavigatorKey = GlobalKey<NavigatorState>();
 
@@ -112,6 +113,10 @@ final appRouter = GoRouter(
           }
           return ScanMedicationAnalysisScreen(input: input);
         },
+      ),
+      GoRoute(
+        path: '/pals',
+        builder: (context, state) => const PalsGalleryPage(),
       ),
       GoRoute(
         path: '/caregiver',
