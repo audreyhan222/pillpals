@@ -17,6 +17,8 @@ dependencies:
   win32: ^5.5.4
   flutter_local_notifications: ^19.4.2
   timezone: ^0.10.1
+  image_picker: ^1.1.2
+  google_mlkit_text_recognition: ^0.15.0
 
 dev_dependencies:
   flutter_test:
