@@ -399,7 +399,13 @@ class _PetCard extends StatelessWidget {
                     ),
                   ],
                 ),
-                child: const Icon(Icons.pets_rounded, color: Colors.white, size: 44),
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Image.asset(
+                    'assets/pals/cat/neutral.png',
+                    fit: BoxFit.contain,
+                  ),
+                ),
               ),
             ),
           ),
