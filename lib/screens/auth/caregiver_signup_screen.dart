@@ -68,33 +68,33 @@ class _CaregiverSignupScreenState extends State<CaregiverSignupScreen>
     try {
       final username = _username.text.trim();
 
-      // Check if username already exists
       final existing = await FirebaseFirestore.instance
-          .collection('caretakers')
+          .collection('caretaker')
           .doc(username)
           .get();
 
       if (existing.exists) {
         setState(() => _error = 'That username is already taken. Please choose another.');
-        return;
+        return; // finally still runs, so _loading will be reset ✓
       }
 
-      // Create document in caretakers collection with username as the doc ID
       await FirebaseFirestore.instance
-          .collection('caretakers')
+          .collection('caretaker')
           .doc(username)
           .set({
         'name': _name.text.trim(),
+        'username': username,        // ← add this so it's stored too
         'password': _password.text,
         'patients': [],
+        'createdAt': FieldValue.serverTimestamp(), // ← helps confirm writes in console
       });
 
       final session = context.read<SessionStore>();
       await session.setRole('caregiver');
       if (!mounted) return;
-      context.go('/caregiver');
+      context.go('/caregiver_elderly_selection_screen');
     } catch (e) {
-      setState(() => _error = 'Something went wrong. Please try again.');
+      setState(() => _error = 'Something went wrong: $e'); // ← show actual error
     } finally {
       if (mounted) setState(() => _loading = false);
     }
