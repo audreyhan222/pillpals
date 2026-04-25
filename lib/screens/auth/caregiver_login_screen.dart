@@ -16,7 +16,6 @@ class _CaregiverLoginScreenState extends State<CaregiverLoginScreen>
     with SingleTickerProviderStateMixin {
   final _email = TextEditingController();
   final _password = TextEditingController();
-  final _elderlyIdCode = TextEditingController();
   bool _obscurePassword = true;
 
   late final AnimationController _controller;
@@ -42,7 +41,6 @@ class _CaregiverLoginScreenState extends State<CaregiverLoginScreen>
   void dispose() {
     _email.dispose();
     _password.dispose();
-    _elderlyIdCode.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -166,7 +164,7 @@ class _CaregiverLoginScreenState extends State<CaregiverLoginScreen>
                             ),
                             const SizedBox(height: 6),
                             const Text(
-                              'Link to the elderly profile using their ID code.',
+                              'Continue to your caregiver tools.',
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                 fontSize: 13,
@@ -198,15 +196,6 @@ class _CaregiverLoginScreenState extends State<CaregiverLoginScreen>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            _StyledTextField(
-                              controller: _elderlyIdCode,
-                              label: 'Elderly ID code',
-                              icon: Icons.qr_code_rounded,
-                              accentColor: const Color(0xFFE5A800),
-                              keyboardType: TextInputType.text,
-                              textInputAction: TextInputAction.next,
-                            ),
-                            const SizedBox(height: 14),
                             _StyledTextField(
                               controller: _email,
                               label: 'Email address',

@@ -2,25 +2,32 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
-class CaregiverElderlySelectionScreen extends StatelessWidget {
+class CaregiverElderlySelectionScreen extends StatefulWidget {
   const CaregiverElderlySelectionScreen({super.key});
 
-  static const _linked = <_LinkedElderly>[
-    _LinkedElderly(
+  @override
+  State<CaregiverElderlySelectionScreen> createState() =>
+      _CaregiverElderlySelectionScreenState();
+}
+
+class _CaregiverElderlySelectionScreenState
+    extends State<CaregiverElderlySelectionScreen> {
+  final List<_LinkedElderly> _linked = <_LinkedElderly>[
+    const _LinkedElderly(
       id: 'e-1001',
       name: 'Maria G.',
       subtitle: '3 meds • last confirmed 2h ago',
       color: Color(0xFF4A90D9),
       icon: Icons.favorite_rounded,
     ),
-    _LinkedElderly(
+    const _LinkedElderly(
       id: 'e-1002',
       name: 'James P.',
       subtitle: '5 meds • 1 dose pending',
       color: Color(0xFFE5A800),
       icon: Icons.alarm_rounded,
     ),
-    _LinkedElderly(
+    const _LinkedElderly(
       id: 'e-1003',
       name: 'Evelyn S.',
       subtitle: '2 meds • streak 6 days',
@@ -28,6 +35,68 @@ class CaregiverElderlySelectionScreen extends StatelessWidget {
       icon: Icons.insights_rounded,
     ),
   ];
+
+  Future<void> _promptAddPerson() async {
+    final controller = TextEditingController();
+    try {
+      final addedId = await showDialog<String>(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: const Text('Link an elderly user'),
+            content: TextField(
+              controller: controller,
+              autofocus: true,
+              textInputAction: TextInputAction.done,
+              decoration: const InputDecoration(
+                labelText: 'Unique ID',
+                hintText: 'e.g. e-1042',
+              ),
+              onSubmitted: (_) => Navigator.of(context).pop(controller.text),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(controller.text),
+                child: const Text('Add'),
+              ),
+            ],
+          );
+        },
+      );
+
+      final id = (addedId ?? '').trim();
+      if (!mounted) return;
+      if (id.isEmpty) return;
+
+      final exists = _linked.any(
+        (p) => p.id.toLowerCase() == id.toLowerCase(),
+      );
+      if (exists) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('That ID is already linked: $id')),
+        );
+        return;
+      }
+
+      setState(() {
+        _linked.add(
+          _LinkedElderly(
+            id: id,
+            name: 'Linked user',
+            subtitle: 'Linked by ID • stats loading soon',
+            color: const Color(0xFF4A90D9),
+            icon: Icons.link_rounded,
+          ),
+        );
+      });
+    } finally {
+      controller.dispose();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -56,14 +125,6 @@ class CaregiverElderlySelectionScreen extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    _GlassIconButton(
-                      icon: Icons.arrow_back_ios_new_rounded,
-                      onTap: () {
-                        HapticFeedback.lightImpact();
-                        context.go('/dashboard');
-                      },
-                    ),
-                    const SizedBox(width: 12),
                     const Expanded(
                       child: Text(
                         'Your people',
@@ -78,9 +139,7 @@ class CaregiverElderlySelectionScreen extends StatelessWidget {
                       icon: Icons.person_add_alt_1_rounded,
                       onTap: () {
                         HapticFeedback.lightImpact();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Link flow coming soon.')),
-                        );
+                        _promptAddPerson();
                       },
                     ),
                   ],

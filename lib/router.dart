@@ -28,10 +28,8 @@ final appRouter = GoRouter(
       final session = context.read<SessionStore>();
       if (!session.bootstrapped) return null;
 
-      final isLoggingIn = state.matchedLocation == '/login' ||
-          state.matchedLocation == '/login/elderly' ||
-          state.matchedLocation == '/login/caregiver' ||
-          state.matchedLocation == '/signup';
+      final isLoggingIn =
+          state.matchedLocation.startsWith('/login') || state.matchedLocation == '/signup';
       final isRolePick = state.matchedLocation == '/role';
       // For now, dashboard is public (no credentials required yet).
       final isPublic = state.matchedLocation == '/' ||
@@ -42,7 +40,8 @@ final appRouter = GoRouter(
           state.matchedLocation == '/dashboard/left' ||
           state.matchedLocation == '/dashboard/right' ||
           state.matchedLocation == '/scan' ||
-          state.matchedLocation == '/scan/analysis';
+          state.matchedLocation == '/scan/analysis' ||
+          state.matchedLocation.startsWith('/caregiver');
 
       if (!session.isAuthed && !isPublic) {
         return '/login';

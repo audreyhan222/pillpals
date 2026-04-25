@@ -48,30 +48,6 @@ class _DashboardScreenState extends State<DashboardScreen>
     ),
   ];
 
-  final _careAlerts = const <_CareAlert>[
-    _CareAlert(
-      title: 'Morning dose pending',
-      subtitle: 'Metformin • scheduled 8:00 AM',
-      severity: _CareSeverity.warning,
-      icon: Icons.alarm_rounded,
-      color: Color(0xFFE5A800),
-    ),
-    _CareAlert(
-      title: 'All caught up',
-      subtitle: 'No missed doses in the last 24h',
-      severity: _CareSeverity.ok,
-      icon: Icons.check_circle_rounded,
-      color: Color(0xFF4A90D9),
-    ),
-    _CareAlert(
-      title: 'Streak: 5 days',
-      subtitle: 'Confirmed doses improving',
-      severity: _CareSeverity.info,
-      icon: Icons.insights_rounded,
-      color: Color(0xFF7DB8F7),
-    ),
-  ];
-
   @override
   void initState() {
     super.initState();
@@ -236,7 +212,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                           child: _PetCard(
                             accent: cs.primary,
                             statusText: isCaregiver
-                                ? 'Let’s check in on your person'
+                                ? 'I’m ready to help you today'
                                 : 'I’m ready to help you today',
                           ),
                         ),
@@ -292,12 +268,10 @@ class _DashboardScreenState extends State<DashboardScreen>
               // Bottom pills panel
               Align(
                 alignment: Alignment.bottomCenter,
-                child: isCaregiver
-                    ? _CaregiverPanel(alerts: _careAlerts)
-                    : _TodayPillsPanel(
-                        pills: _todayPills,
-                        onPillTap: _showPillDetails,
-                      ),
+                child: _TodayPillsPanel(
+                  pills: _todayPills,
+                  onPillTap: _showPillDetails,
+                ),
               ),
             ],
           ),
@@ -530,152 +504,6 @@ class _TodayPillsPanel extends StatelessWidget {
   }
 }
 
-class _CaregiverPanel extends StatelessWidget {
-  const _CaregiverPanel({required this.alerts});
-
-  final List<_CareAlert> alerts;
-
-  @override
-  Widget build(BuildContext context) {
-    final bottomInset = MediaQuery.of(context).padding.bottom;
-    return Container(
-      margin: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-      padding: EdgeInsets.fromLTRB(16, 14, 16, 12 + bottomInset * 0.25),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.82),
-        borderRadius: BorderRadius.circular(26),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.92),
-          width: 1.4,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.10),
-            blurRadius: 26,
-            offset: const Offset(0, -6),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Text(
-                'Care overview',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w900,
-                  color: Color(0xFF1E2D4A),
-                ),
-              ),
-              const Spacer(),
-              Text(
-                '${alerts.length} updates',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.black.withValues(alpha: 0.55),
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 190),
-            child: ListView.separated(
-              shrinkWrap: true,
-              itemCount: alerts.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 10),
-              itemBuilder: (context, index) {
-                final a = alerts[index];
-                return _CareAlertTile(alert: a);
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _CareAlertTile extends StatelessWidget {
-  const _CareAlertTile({required this.alert});
-
-  final _CareAlert alert;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white.withValues(alpha: 0.6),
-      borderRadius: BorderRadius.circular(18),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(18),
-        onTap: () {
-          HapticFeedback.lightImpact();
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(alert.subtitle)),
-          );
-        },
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-          child: Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: alert.color.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Icon(alert.icon, color: alert.color),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      alert.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w900,
-                        color: Color(0xFF1E2D4A),
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      alert.subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.black.withValues(alpha: 0.58),
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 10),
-              Icon(
-                alert.severity == _CareSeverity.warning
-                    ? Icons.priority_high_rounded
-                    : Icons.info_outline_rounded,
-                color: Colors.black.withValues(alpha: 0.45),
-                size: 18,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _PillTile extends StatelessWidget {
   const _PillTile({required this.pill, required this.onTap});
 
@@ -762,23 +590,5 @@ class _PillItem {
   final String instructions;
   final Color color;
   final IconData icon;
-}
-
-enum _CareSeverity { ok, info, warning }
-
-class _CareAlert {
-  const _CareAlert({
-    required this.title,
-    required this.subtitle,
-    required this.severity,
-    required this.icon,
-    required this.color,
-  });
-
-  final String title;
-  final String subtitle;
-  final _CareSeverity severity;
-  final IconData icon;
-  final Color color;
 }
 
