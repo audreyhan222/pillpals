@@ -12,5 +12,11 @@ class ApiEndpoints {
   static String aiSuggestion(int userId) => '/ai-suggestion/$userId';
   static const caregiverAlert = '/caregiver/alert';
   static const scanMedication = '/scan-medication';
+
+  /// Dev-only: backend endpoint that triggers a real push (FCM/APNs).
+  /// Implement this on your server/Cloud Function.
+  static const devPush = '/dev/push';
+
+  static const registerPushToken = '/push/token';
 }
 

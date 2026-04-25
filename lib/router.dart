@@ -9,6 +9,7 @@ import 'screens/auth/elderly_signup_screen.dart';
 import 'screens/auth/signup_screen.dart';
 import 'screens/dashboard/dashboard_right_screen.dart';
 import 'screens/dashboard/dashboard_screen.dart';
+import 'screens/dev/dev_screen.dart';
 import 'screens/role/landing_page.dart';
 import 'screens/role/role_select_screen.dart';
 import 'screens/reminder/reminder_screen.dart';
@@ -37,6 +38,7 @@ final appRouter = GoRouter(
       final isPublic = state.matchedLocation == '/' ||
           isLoggingIn ||
           isRolePick ||
+          state.matchedLocation == '/dev' ||
           state.matchedLocation == '/reminder' ||
           state.matchedLocation == '/dashboard' ||
           state.matchedLocation == '/dashboard/right' ||
@@ -57,6 +59,10 @@ final appRouter = GoRouter(
       GoRoute(
         path: '/',
         builder: (context, state) => const LandingPage(),
+      ),
+      GoRoute(
+        path: '/dev',
+        builder: (context, state) => const DevScreen(),
       ),
       GoRoute(
         path: '/login',

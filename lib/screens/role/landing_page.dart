@@ -407,6 +407,25 @@ class _LandingPageState extends State<LandingPage>
               ),
             ],
           ),
+
+          const SizedBox(height: 10),
+
+          // Tiny dev entry point (debug builds / internal use).
+          TextButton(
+            onPressed: () => context.go('/dev'),
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFF8A94A6),
+              textStyle: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.6,
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text('Dev'),
+          ),
         ],
       ),
     );

@@ -1,11 +1,16 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:flutter/material.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
+
+import '../api/api_client.dart';
+import '../api/endpoints.dart';
+import '../config/app_config.dart';
 
 class NotificationService {
   NotificationService._();
@@ -98,6 +103,91 @@ class NotificationService {
       ),
       androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
       payload: 'test',
+    );
+  }
+
+  Future<void> showTestNow({String? payload}) async {
+    await _plugin.show(
+      1002,
+      'Test notification',
+      'This is a dev-triggered reminder.',
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'dose_reminders',
+          'Dose reminders',
+          importance: Importance.max,
+          priority: Priority.high,
+        ),
+        iOS: DarwinNotificationDetails(
+          interruptionLevel: InterruptionLevel.timeSensitive,
+          presentSound: true,
+        ),
+      ),
+      payload: payload ?? 'dev-test',
+    );
+  }
+
+  /// Tries to send a REAL push notification by calling your backend.
+  ///
+  /// Notes:
+  /// - A real push requires server credentials (FCM/APNs). The app itself
+  ///   cannot safely send push directly.
+  /// - If the backend endpoint is not implemented/reachable, we fall back to a
+  ///   local notification so the button still provides feedback.
+  Future<void> triggerDevPush({String? message, String? authToken}) async {
+    if (kIsWeb) {
+      // Local notifications are not supported in the same way on web.
+      return;
+    }
+
+    try {
+      final api = ApiClient(baseUrl: AppConfig.apiBaseUrl, token: authToken);
+      await api.dio.post(
+        ApiEndpoints.devPush,
+        data: <String, dynamic>{
+          'title': 'PillPal (Dev)',
+          'body': message ?? 'This is a dev-triggered push notification.',
+          // Add targeting fields on the server side (token/userId/topic).
+        },
+      );
+    } catch (e) {
+      // Fallback so the UI always "does something" during development.
+      await showTestNow(payload: 'dev_push_fallback');
+    }
+  }
+
+  /// Registers this device's current FCM token with the backend.
+  ///
+  /// Backend requires auth; if [authToken] is null/empty we skip quietly.
+  Future<void> registerFcmTokenWithBackend({
+    required String? authToken,
+    String? baseUrl,
+  }) async {
+    if (kIsWeb) return;
+    if (authToken == null || authToken.isEmpty) return;
+
+    // Request iOS notification permission (FCM/APNs).
+    await FirebaseMessaging.instance.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
+
+    final token = await FirebaseMessaging.instance.getToken();
+    if (token == null || token.isEmpty) return;
+
+    final api = ApiClient(
+      baseUrl: (baseUrl == null || baseUrl.trim().isEmpty)
+          ? AppConfig.apiBaseUrl
+          : baseUrl.trim(),
+      token: authToken,
+    );
+    await api.dio.post(
+      ApiEndpoints.registerPushToken,
+      data: <String, dynamic>{
+        'token': token,
+        'platform': 'ios',
+      },
     );
   }
 

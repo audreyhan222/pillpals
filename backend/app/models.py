@@ -85,3 +85,16 @@ class Alert(SQLModel, table=True):
     sent_to_caregiver: bool = False
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
+
+class DevicePushToken(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    # We tie tokens to AuthUser because the backend auth/JWT subject is AuthUser.id.
+    auth_user_id: int = Field(index=True)
+
+    platform: str = Field(default="ios", index=True)
+    fcm_token: str = Field(index=True, unique=True)
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    last_seen_at: datetime = Field(default_factory=datetime.utcnow)
+

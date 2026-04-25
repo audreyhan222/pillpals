@@ -18,7 +18,7 @@ from .auth import (
     verify_password,
 )
 from .db import get_session, init_db
-from .models import AuthUser, Caregiver, DoseLog, DoseStatus, Medication, Role, User
+from .models import AuthUser, Caregiver, DevicePushToken, DoseLog, DoseStatus, Medication, Role, User
 from .schemas import (
     AiSuggestionOut,
     CaregiverAlertIn,
@@ -37,8 +37,12 @@ from .schemas import (
     TokenOut,
     UserOut,
     LinkCaregiverIn,
+    PushTokenIn,
+    PushTokenOut,
+    DevPushIn,
 )
 from .settings import settings
+from .push.fcm import send_to_token
 
 app = FastAPI(title=settings.app_name)
 
@@ -59,6 +63,74 @@ def on_startup():
 @app.get("/health")
 def health():
     return {"ok": True}
+
+
+@app.post("/push/token", response_model=PushTokenOut)
+def register_push_token(
+    payload: PushTokenIn,
+    auth_user: AuthUser = Depends(get_current_auth_user),
+    session: Session = Depends(get_session),
+):
+    token = payload.token.strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="Missing token.")
+
+    existing = session.exec(select(DevicePushToken).where(DevicePushToken.fcm_token == token)).first()
+    now = datetime.utcnow()
+    if existing:
+        existing.auth_user_id = auth_user.id  # type: ignore[arg-type]
+        existing.platform = payload.platform
+        existing.last_seen_at = now
+        session.add(existing)
+        session.commit()
+        return PushTokenOut(ok=True)
+
+    session.add(
+        DevicePushToken(
+            auth_user_id=auth_user.id,  # type: ignore[arg-type]
+            platform=payload.platform,
+            fcm_token=token,
+            created_at=now,
+            last_seen_at=now,
+        )
+    )
+    session.commit()
+    return PushTokenOut(ok=True)
+
+
+@app.post("/dev/push")
+def dev_push(
+    payload: DevPushIn,
+    auth_user: AuthUser = Depends(get_current_auth_user),
+    session: Session = Depends(get_session),
+):
+    if not settings.enable_dev_push_endpoints:
+        raise HTTPException(status_code=404, detail="Not found.")
+
+    tokens = session.exec(
+        select(DevicePushToken).where(DevicePushToken.auth_user_id == auth_user.id)
+    ).all()
+    if not tokens:
+        raise HTTPException(status_code=400, detail="No push tokens registered for this user.")
+
+    data: dict[str, str] | None = None
+    if payload.data:
+        data = {str(k): str(v) for k, v in payload.data.items()}
+
+    results = []
+    for t in tokens:
+        try:
+            msg_id = send_to_token(
+                token=t.fcm_token,
+                title=payload.title,
+                body=payload.body,
+                data=data,
+            )
+            results.append({"token": t.fcm_token, "message_id": msg_id})
+        except Exception as e:
+            results.append({"token": t.fcm_token, "error": str(e)})
+
+    return {"sent": len([r for r in results if "message_id" in r]), "results": results}
 
 
 def _invite_code() -> str:

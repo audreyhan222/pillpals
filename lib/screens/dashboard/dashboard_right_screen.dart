@@ -3,7 +3,6 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../state/pill_completion_store.dart';
-import 'package:flutter/foundation.dart';
 
 class DashboardRightScreen extends StatelessWidget {
   const DashboardRightScreen({super.key});
@@ -182,28 +181,6 @@ class _PillCalendarCardState extends State<_PillCalendarCard> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (kDebugMode) ...[
-          _DevResetRow(
-            onResetSelected: () async {
-              await widget.store.clearDay(_selected);
-              if (!mounted) return;
-              setState(() {});
-            },
-            onResetAll: () async {
-              await widget.store.clearAll();
-              if (!mounted) return;
-              setState(() {});
-            },
-            onJumpToday: () {
-              final now = DateTime.now();
-              setState(() {
-                _selected = DateTime(now.year, now.month, now.day);
-                _month = DateTime(now.year, now.month);
-              });
-            },
-          ),
-          const SizedBox(height: 10),
-        ],
         Row(
           children: [
             _MiniGlassIconButton(icon: Icons.chevron_left_rounded, onTap: _prevMonth),
@@ -518,72 +495,4 @@ const _monthNames = <String>[
   'November',
   'December',
 ];
-
-class _DevResetRow extends StatelessWidget {
-  const _DevResetRow({
-    required this.onResetSelected,
-    required this.onResetAll,
-    required this.onJumpToday,
-  });
-
-  final VoidCallback onJumpToday;
-  final Future<void> Function() onResetSelected;
-  final Future<void> Function() onResetAll;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.60),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.9), width: 1.25),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'Dev tools',
-            style: TextStyle(
-              fontSize: 12,
-              letterSpacing: 0.35,
-              fontWeight: FontWeight.w900,
-              color: Colors.black.withValues(alpha: 0.60),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton.tonalIcon(
-                  onPressed: onJumpToday,
-                  icon: const Icon(Icons.today_rounded),
-                  label: const Text('Today'),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: FilledButton.tonalIcon(
-                  onPressed: () => onResetSelected(),
-                  icon: const Icon(Icons.restart_alt_rounded),
-                  label: const Text('Reset day'),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          FilledButton.icon(
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFFFE8E8),
-              foregroundColor: const Color(0xFF8A1F1F),
-            ),
-            onPressed: () => onResetAll(),
-            icon: const Icon(Icons.delete_forever_rounded),
-            label: const Text('Reset ALL history'),
-          ),
-        ],
-      ),
-    );
-  }
-}
 

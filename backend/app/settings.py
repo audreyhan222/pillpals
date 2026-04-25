@@ -10,6 +10,11 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./pillpals.db"
     cors_allow_origins: str = "*"
 
+    # Push notifications (FCM -> APNs)
+    # Either a path to a Firebase service account JSON file, or the JSON itself.
+    firebase_service_account_json: str = ""
+    enable_dev_push_endpoints: bool = True
+
 
 settings = Settings()
 

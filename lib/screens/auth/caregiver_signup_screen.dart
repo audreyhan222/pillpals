@@ -4,6 +4,9 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../../api/api_client.dart';
+import '../../api/endpoints.dart';
+import '../../state/api_config_store.dart';
 import '../../state/session_store.dart';
 
 class CaregiverSignupScreen extends StatefulWidget {
@@ -19,6 +22,8 @@ class _CaregiverSignupScreenState extends State<CaregiverSignupScreen>
   final _username = TextEditingController();
   final _password = TextEditingController();
   bool _obscurePassword = true;
+  bool _loading = false;
+  String? _error;
   bool _loading = false;
   String? _error;
 
@@ -95,6 +100,36 @@ class _CaregiverSignupScreenState extends State<CaregiverSignupScreen>
       context.go('/caregiver_elderly_selection_screen');
     } catch (e) {
       setState(() => _error = 'Something went wrong: $e'); // ← show actual error
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      final baseUrl = context.read<ApiConfigStore>().baseUrl;
+      final api = ApiClient(baseUrl: baseUrl);
+      final res = await api.dio.post(ApiEndpoints.signup, data: {
+        'email': _email.text.trim(),
+        'password': _password.text,
+      });
+      final data = res.data as Map<String, dynamic>;
+      final token = data['access_token'] as String?;
+      if (token == null || token.isEmpty) throw Exception('Missing token');
+
+      if (!mounted) return;
+      final session = context.read<SessionStore>();
+      await session.setToken(token);
+      await session.setRole('caregiver');
+      if (!mounted) return;
+      context.go('/caregiver');
+    } catch (e) {
+      setState(
+        () => _error =
+            'Sign up failed. Try a different email/password and verify the backend URL (Dev page).',
+      );
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -325,6 +360,7 @@ class _CaregiverSignupScreenState extends State<CaregiverSignupScreen>
                             _GradientButton(
                               label: 'Create account',
                               enabled: !_loading,
+                              enabled: !_loading,
                               gradient: const LinearGradient(
                                 begin: Alignment.topLeft,
                                 end: Alignment.bottomRight,
@@ -337,6 +373,16 @@ class _CaregiverSignupScreenState extends State<CaregiverSignupScreen>
                                   .withValues(alpha: 0.35),
                               onTap: _loading ? null : _submit,
                             ),
+                            if (_error != null) ...[
+                              const SizedBox(height: 12),
+                              Text(
+                                _error!,
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.error,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                       ),
