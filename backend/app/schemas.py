@@ -11,6 +11,9 @@ from .models import DoseStatus, Role
 class SignupIn(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6)
+    # Optional: mirrored to Firebase (Firestore) by the backend when Admin SDK is configured.
+    name: Optional[str] = None
+    account_role: Optional[str] = None  # e.g. "caregiver" | "elderly"
 
 
 class LoginIn(BaseModel):
@@ -18,9 +21,24 @@ class LoginIn(BaseModel):
     password: str
 
 
+class CaregiverLocalSignupIn(BaseModel):
+    """Username = Firestore document id; `password` is stored on that document (MVP) + hashed in API DB."""
+
+    username: str = Field(min_length=1, max_length=200)
+    password: str = Field(min_length=6)
+    name: str = Field(min_length=1, max_length=200)
+
+
+class CaregiverLocalLoginIn(BaseModel):
+    username: str = Field(min_length=1, max_length=200)
+    password: str
+
+
 class TokenOut(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    # Set on signup: whether profile was written to Firestore (Admin SDK). Client may ignore.
+    firestore_user_sync: Optional[str] = None
 
 
 class ProfileUpsertIn(BaseModel):

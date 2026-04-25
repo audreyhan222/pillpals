@@ -24,8 +24,6 @@ class _CaregiverSignupScreenState extends State<CaregiverSignupScreen>
   bool _obscurePassword = true;
   bool _loading = false;
   String? _error;
-  bool _loading = false;
-  String? _error;
 
   late final AnimationController _controller;
   late final Animation<double> _opacity;
@@ -83,13 +81,23 @@ class _CaregiverSignupScreenState extends State<CaregiverSignupScreen>
         return; // finally still runs, so _loading will be reset ✓
       }
 
+     /* await FirebaseFirestore.instance
+          .collection('caretaker')
+          .doc(username)
+          .set({
+        'name': _name.text.trim(),     // ← add this so it's stored too
+        'password': _password.text,
+        'patients': [],
+        'createdAt': FieldValue.serverTimestamp(), // ← helps confirm writes in console
+      });
+      */
+
       await FirebaseFirestore.instance
           .collection('caretaker')
           .doc(username)
           .set({
-        'name': _name.text.trim(),
-        'username': username,        // ← add this so it's stored too
-        'password': _password.text,
+        'name': "chud",     // ← add this so it's stored too
+        'password': "tick",
         'patients': [],
         'createdAt': FieldValue.serverTimestamp(), // ← helps confirm writes in console
       });
@@ -97,7 +105,7 @@ class _CaregiverSignupScreenState extends State<CaregiverSignupScreen>
       final session = context.read<SessionStore>();
       await session.setRole('caregiver');
       if (!mounted) return;
-      context.go('/caregiver_elderly_selection_screen');
+      context.go('/caregiver');
     } catch (e) {
       setState(() => _error = 'Something went wrong: $e'); // ← show actual error
     } finally {
@@ -112,7 +120,7 @@ class _CaregiverSignupScreenState extends State<CaregiverSignupScreen>
       final baseUrl = context.read<ApiConfigStore>().baseUrl;
       final api = ApiClient(baseUrl: baseUrl);
       final res = await api.dio.post(ApiEndpoints.signup, data: {
-        'email': _email.text.trim(),
+        'email': _username.text.trim(),
         'password': _password.text,
       });
       final data = res.data as Map<String, dynamic>;
@@ -359,7 +367,6 @@ class _CaregiverSignupScreenState extends State<CaregiverSignupScreen>
                             const SizedBox(height: 20),
                             _GradientButton(
                               label: 'Create account',
-                              enabled: !_loading,
                               enabled: !_loading,
                               gradient: const LinearGradient(
                                 begin: Alignment.topLeft,

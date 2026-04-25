@@ -1,6 +1,9 @@
 class ApiEndpoints {
   static const signup = '/auth/signup';
   static const login = '/auth/login';
+  /// Caregiver: Firestore `caregivers/{username}` holds `password`; backend also issues a JWT.
+  static const caregiverSignup = '/auth/caregiver/signup';
+  static const caregiverLogin = '/auth/caregiver/login';
   static const upsertUser = '/users';
   static String getUser(int id) => '/users/$id';
   static const linkCaregiver = '/caregivers/link';

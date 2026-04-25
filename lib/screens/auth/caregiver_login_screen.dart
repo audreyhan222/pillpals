@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -17,7 +18,7 @@ class CaregiverLoginScreen extends StatefulWidget {
 
 class _CaregiverLoginScreenState extends State<CaregiverLoginScreen>
     with SingleTickerProviderStateMixin {
-  final _email = TextEditingController();
+  final _username = TextEditingController();
   final _password = TextEditingController();
   bool _obscurePassword = true;
   bool _loading = false;
@@ -44,14 +45,14 @@ class _CaregiverLoginScreenState extends State<CaregiverLoginScreen>
 
   @override
   void dispose() {
-    _email.dispose();
+    _username.dispose();
     _password.dispose();
     _controller.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
-    if (_email.text.trim().isEmpty || _password.text.isEmpty) {
+    if (_username.text.trim().isEmpty || _password.text.isEmpty) {
       setState(() => _error = 'Please enter your username and password.');
       return;
     }
@@ -66,10 +67,13 @@ class _CaregiverLoginScreenState extends State<CaregiverLoginScreen>
     try {
       final baseUrl = context.read<ApiConfigStore>().baseUrl;
       final api = ApiClient(baseUrl: baseUrl);
-      final res = await api.dio.post(ApiEndpoints.login, data: {
-        'email': _email.text.trim(),
-        'password': _password.text,
-      });
+      final res = await api.dio.post(
+        ApiEndpoints.caregiverLogin,
+        data: {
+          'username': _username.text.trim(),
+          'password': _password.text,
+        },
+      );
       final data = res.data as Map<String, dynamic>;
       final token = data['access_token'] as String?;
       if (token == null || token.isEmpty) throw Exception('Missing token');
@@ -80,10 +84,18 @@ class _CaregiverLoginScreenState extends State<CaregiverLoginScreen>
       await session.setRole('caregiver');
       if (!mounted) return;
       context.go('/caregiver');
+    } on DioException catch (e) {
+      final d = e.response?.data;
+      final msg = d is Map && d['detail'] is String
+          ? d['detail'] as String
+          : d is String
+              ? d
+              : e.message;
+      if (!mounted) return;
+      setState(() => _error = msg ?? 'Sign in failed. Check backend URL in Dev and try again.');
     } catch (e) {
       setState(
-        () => _error =
-            'Login failed. Check email/password and ensure the backend URL is reachable (Dev page).',
+        () => _error = 'Sign in failed. Is the API running? Set the backend URL on the Dev page.',
       );
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -233,7 +245,7 @@ class _CaregiverLoginScreenState extends State<CaregiverLoginScreen>
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             _StyledTextField(
-                              controller: _email,
+                              controller: _username,
                               label: 'Username',
                               icon: Icons.person_outline_rounded,
                               accentColor: const Color(0xFF4A90D9),

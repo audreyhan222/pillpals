@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import random
 import string
 from datetime import datetime, timedelta, timezone
@@ -36,6 +37,8 @@ from .schemas import (
     SignupIn,
     TokenOut,
     UserOut,
+    CaregiverLocalLoginIn,
+    CaregiverLocalSignupIn,
     LinkCaregiverIn,
     PushTokenIn,
     PushTokenOut,
@@ -43,6 +46,17 @@ from .schemas import (
 )
 from .settings import settings
 from .push.fcm import send_to_token
+from .firebase_health import get_firebase_health
+from .caregiver_local import (
+    caregiver_doc_id,
+    create_caregiver_doc,
+    delete_caregiver_doc,
+    derived_caregiver_email,
+    get_caregiver_doc,
+    verify_caregiver_password,
+)
+
+log = logging.getLogger(__name__)
 
 app = FastAPI(title=settings.app_name)
 
@@ -58,11 +72,18 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup():
     init_db()
+    log.info("Firebase admin key: %s", settings.firebase_admin_key_source())
 
 
 @app.get("/health")
 def health():
     return {"ok": True}
+
+
+@app.get("/health/firebase")
+def health_firebase():
+    """Check Admin SDK + Firestore; see `where_to_look` (Firestore, not Realtime DB)."""
+    return get_firebase_health()
 
 
 @app.post("/push/token", response_model=PushTokenOut)
@@ -152,8 +173,25 @@ def signup(payload: SignupIn, session: Session = Depends(get_session)):
     session.add(auth_user)
     session.commit()
     session.refresh(auth_user)
+    firestore_user_sync: str | None = "skipped"
+    if payload.name and payload.account_role:
+        try:
+            from .firestore_sync import upsert_user_document
+
+            if upsert_user_document(
+                email=payload.email,
+                name=payload.name,
+                role=payload.account_role,
+                auth_user_id=auth_user.id,
+            ):
+                firestore_user_sync = "ok"
+            else:
+                firestore_user_sync = "failed_or_no_credentials"
+        except Exception:
+            log.exception("Firestore user sync failed after signup (auth user still created)")
+            firestore_user_sync = "error"
     token = create_access_token(subject=str(auth_user.id), expires_minutes=settings.access_token_exp_minutes)
-    return TokenOut(access_token=token)
+    return TokenOut(access_token=token, firestore_user_sync=firestore_user_sync)
 
 
 @app.post("/auth/login", response_model=TokenOut)
@@ -161,6 +199,97 @@ def login(payload: LoginIn, session: Session = Depends(get_session)):
     auth_user = get_auth_user_by_email(session, payload.email)
     if not auth_user or not verify_password(payload.password, auth_user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid email or password.")
+    token = create_access_token(subject=str(auth_user.id), expires_minutes=settings.access_token_exp_minutes)
+    return TokenOut(access_token=token)
+
+
+@app.post("/auth/caregiver/signup", response_model=TokenOut)
+def caregiver_signup_with_firestore_doc(
+    payload: CaregiverLocalSignupIn, session: Session = Depends(get_session)
+):
+    """
+    Creates `caregivers/{username}` in Firestore with a `password` field (MVP) and a matching
+    local API user (JWT) using a derived synthetic email.
+    """
+    if not settings.has_firebase_credentials():
+        raise HTTPException(
+            status_code=503,
+            detail="Set FIREBASE_SERVICE_ACCOUNT_PATH in backend/.env for caregiver sign-up.",
+        )
+    try:
+        doc_id = caregiver_doc_id(payload.username)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    email = derived_caregiver_email(doc_id)
+    if get_auth_user_by_email(session, email):
+        raise HTTPException(status_code=400, detail="That username is already registered.")
+
+    created_fs = False
+    try:
+        create_caregiver_doc(
+            username=payload.username,
+            password=payload.password,
+            name=payload.name,
+        )
+        created_fs = True
+    except ValueError as e:
+        if str(e) == "username_taken":
+            raise HTTPException(status_code=400, detail="That username is already taken.")
+        raise
+
+    try:
+        auth_user = AuthUser(email=email, password_hash=hash_password(payload.password))
+        session.add(auth_user)
+        session.commit()
+        session.refresh(auth_user)
+    except Exception:
+        if created_fs:
+            try:
+                delete_caregiver_doc(username=payload.username)
+            except Exception:
+                log.exception("Failed to delete Firestore caregiver doc after database error")
+        raise
+
+    try:
+        from .firestore_sync import upsert_user_document
+
+        upsert_user_document(
+            email=email,
+            name=payload.name,
+            role="caregiver",
+            auth_user_id=auth_user.id,
+        )
+    except Exception:
+        log.exception("Optional Firestore users/ mirror after caregiver signup")
+    token = create_access_token(subject=str(auth_user.id), expires_minutes=settings.access_token_exp_minutes)
+    return TokenOut(access_token=token, firestore_user_sync="ok")
+
+
+@app.post("/auth/caregiver/login", response_model=TokenOut)
+def caregiver_login_with_firestore_doc(
+    payload: CaregiverLocalLoginIn, session: Session = Depends(get_session)
+):
+    if not settings.has_firebase_credentials():
+        raise HTTPException(
+            status_code=503,
+            detail="Set FIREBASE_SERVICE_ACCOUNT_PATH in backend/.env for caregiver sign-in.",
+        )
+    try:
+        doc_id = caregiver_doc_id(payload.username)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    d = get_caregiver_doc(payload.username)
+    if not verify_caregiver_password(d, payload.password):
+        raise HTTPException(status_code=401, detail="Invalid username or password.")
+    email = derived_caregiver_email(doc_id)
+    auth_user = get_auth_user_by_email(session, email)
+    if not auth_user:
+        raise HTTPException(
+            status_code=401,
+            detail="This username has no app account. Use Sign up to create one.",
+        )
+    if not verify_password(payload.password, auth_user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid username or password.")
     token = create_access_token(subject=str(auth_user.id), expires_minutes=settings.access_token_exp_minutes)
     return TokenOut(access_token=token)
 

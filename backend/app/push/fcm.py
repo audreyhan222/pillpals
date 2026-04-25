@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from functools import lru_cache
 from typing import Any, Dict, Optional
 
@@ -10,22 +11,41 @@ from firebase_admin import credentials, messaging
 from ..settings import settings
 
 
+def init_firebase_app() -> None:
+    """Public entry: initialize Firebase Admin (FCM, Firestore, etc.)."""
+    _init_firebase()
+
+
 @lru_cache(maxsize=1)
 def _init_firebase() -> None:
     if firebase_admin._apps:
         return
 
-    if not settings.firebase_service_account_json:
-        raise RuntimeError("Missing FIREBASE_SERVICE_ACCOUNT_JSON.")
+    if not settings.has_firebase_credentials():
+        raise RuntimeError(
+            "Missing Firebase credentials. Set FIREBASE_SERVICE_ACCOUNT_PATH "
+            "or FIREBASE_SERVICE_ACCOUNT_JSON."
+        )
 
-    raw = settings.firebase_service_account_json.strip()
-    try:
-        # Allow passing the full JSON contents via env var.
-        data = json.loads(raw)
-        cred = credentials.Certificate(data)
-    except json.JSONDecodeError:
-        # Or a file path.
-        cred = credentials.Certificate(raw)
+    if settings.resolved_service_account_path:
+        path = settings.resolved_service_account_path
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"Service account file not found: {path}")
+        cred = credentials.Certificate(path)
+    else:
+        raw = settings.firebase_service_account_json.strip()
+        try:
+            data = json.loads(raw)
+            cred = credentials.Certificate(data)
+        except json.JSONDecodeError:
+            path = os.path.expanduser(raw)
+            if not os.path.isfile(path):
+                hint = raw if len(raw) <= 120 else f"{raw[:117]}..."
+                raise FileNotFoundError(
+                    "FIREBASE_SERVICE_ACCOUNT_JSON is not valid JSON and not an existing file path: "
+                    f"{hint}"
+                ) from None
+            cred = credentials.Certificate(path)
 
     firebase_admin.initialize_app(cred)
 

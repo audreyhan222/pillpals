@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -38,21 +37,16 @@ class _SignupScreenState extends State<SignupScreen> {
     try {
       final baseUrl = context.read<ApiConfigStore>().baseUrl;
       final api = ApiClient(baseUrl: baseUrl);
+      final email = _email.text.trim();
       final res = await api.dio.post(ApiEndpoints.signup, data: {
-        'email': _email.text.trim(),
+        'email': email,
         'password': _password.text,
+        'name': email.split('@').first,
+        'account_role': 'elderly',
       });
       final data = res.data as Map<String, dynamic>;
       final token = data['access_token'] as String?;
       if (token == null || token.isEmpty) throw Exception('Missing token');
-
-      // Save user to Firestore (password is NOT stored — never store plain-text passwords)
-      final userId = data['user_id'] as String? ?? token.split('.').first;
-      await FirebaseFirestore.instance.collection('users').doc(userId).set({
-        'email': _email.text.trim(),
-        'createdAt': FieldValue.serverTimestamp(),
-        'role': 'patient', // default role, update as needed
-      });
 
       await session.setToken(token);
       if (!mounted) return;

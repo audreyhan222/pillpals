@@ -65,6 +65,8 @@ class _ElderlySignupScreenState extends State<ElderlySignupScreen>
       final res = await api.dio.post(ApiEndpoints.signup, data: {
         'email': _email.text.trim(),
         'password': _password.text,
+        'name': _name.text.trim(),
+        'account_role': 'elderly',
       });
       final data = res.data as Map<String, dynamic>;
       final token = data['access_token'] as String?;

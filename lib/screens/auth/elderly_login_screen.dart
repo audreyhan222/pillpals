@@ -23,8 +23,7 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen>
   bool _obscurePassword = true;
   bool _loading = false;
   String? _error;
-  bool _loading = false;
-  String? _error;
+ 
 
   late final AnimationController _controller;
   late final Animation<double> _opacity;
@@ -97,7 +96,7 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen>
       final baseUrl = context.read<ApiConfigStore>().baseUrl;
       final api = ApiClient(baseUrl: baseUrl);
       final res = await api.dio.post(ApiEndpoints.login, data: {
-        'email': _email.text.trim(),
+        'email': _username.text.trim(),
         'password': _password.text,
       });
       final data = res.data as Map<String, dynamic>;
@@ -334,7 +333,6 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen>
                             _GradientButton(
                               label: 'Log in',
                               enabled: !_loading,
-                              enabled: !_loading,
                               gradient: const LinearGradient(
                                 begin: Alignment.topLeft,
                                 end: Alignment.bottomRight,
@@ -391,7 +389,6 @@ class _StyledTextField extends StatelessWidget {
     required this.icon,
     required this.accentColor,
     this.obscureText = false,
-    this.keyboardType,
     this.textInputAction,
     this.suffixIcon,
     this.onSubmitted,
@@ -402,7 +399,6 @@ class _StyledTextField extends StatelessWidget {
   final IconData icon;
   final Color accentColor;
   final bool obscureText;
-  final TextInputType? keyboardType;
   final TextInputAction? textInputAction;
   final Widget? suffixIcon;
   final ValueChanged<String>? onSubmitted;
@@ -412,7 +408,6 @@ class _StyledTextField extends StatelessWidget {
     return TextField(
       controller: controller,
       obscureText: obscureText,
-      keyboardType: keyboardType,
       textInputAction: textInputAction,
       onSubmitted: onSubmitted,
       style: const TextStyle(
