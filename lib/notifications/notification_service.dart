@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_timezone/flutter_timezone.dart';
+import 'package:flutter/material.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 
@@ -16,6 +18,7 @@ class NotificationService {
 
   Future<void> init() async {
     tz.initializeTimeZones();
+    await _configureLocalTimeZone();
 
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
     const iosInit = DarwinInitializationSettings();
@@ -35,8 +38,19 @@ class NotificationService {
     }
   }
 
+  @pragma('vm:entry-point')
   static void _onBackgroundResponse(NotificationResponse resp) {
     // Background callback cannot access instance state reliably.
+  }
+
+  Future<void> _configureLocalTimeZone() async {
+    if (kIsWeb) return;
+    try {
+      final name = await FlutterTimezone.getLocalTimezone();
+      tz.setLocalLocation(tz.getLocation(name));
+    } catch (_) {
+      // Fallback: timezone package will default to UTC if we can't detect local tz.
+    }
   }
 
   Future<void> _requestPermissions() async {
@@ -86,5 +100,55 @@ class NotificationService {
       payload: 'test',
     );
   }
+
+  /// Schedule a daily dose reminder at the given local [time].
+  /// This fires even when the app is closed (local iOS scheduled notification).
+  Future<void> scheduleDailyDoseReminder({
+    required int id,
+    required TimeOfDay time,
+    required String title,
+    required String body,
+    String? payload,
+  }) async {
+    final now = tz.TZDateTime.now(tz.local);
+    var scheduled = tz.TZDateTime(
+      tz.local,
+      now.year,
+      now.month,
+      now.day,
+      time.hour,
+      time.minute,
+    );
+    if (scheduled.isBefore(now)) {
+      scheduled = scheduled.add(const Duration(days: 1));
+    }
+
+    await _plugin.zonedSchedule(
+      id,
+      title,
+      body,
+      scheduled,
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'dose_reminders',
+          'Dose reminders',
+          importance: Importance.max,
+          priority: Priority.high,
+        ),
+        iOS: DarwinNotificationDetails(
+          interruptionLevel: InterruptionLevel.active,
+          presentSound: true,
+        ),
+      ),
+      payload: payload,
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      matchDateTimeComponents: DateTimeComponents.time,
+    );
+  }
+
+  Future<void> cancelReminder(int id) => _plugin.cancel(id);
+
+  Future<List<PendingNotificationRequest>> pendingReminders() =>
+      _plugin.pendingNotificationRequests();
 }
 
