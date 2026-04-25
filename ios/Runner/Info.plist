@@ -68,5 +68,9 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<false/>
+	<key>NSCameraUsageDescription</key>
+	<string>We use the camera to scan your pill bottle label for dosage and instructions.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>We save the pill bottle photo to help with analysis and review.</string>
 </dict>
 </plist>

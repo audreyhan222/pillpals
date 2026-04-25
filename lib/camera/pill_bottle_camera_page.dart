@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:go_router/go_router.dart';
 
@@ -53,6 +54,13 @@ class _PillBottleCameraPageState extends State<PillBottleCameraPage> {
       if (captured == null) {
         if (!mounted) return;
         setState(() => _isProcessing = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'No photo captured. If this keeps happening, enable Camera permission in phone Settings and try reinstalling the app.',
+            ),
+          ),
+        );
         return;
       }
 
@@ -83,6 +91,11 @@ class _PillBottleCameraPageState extends State<PillBottleCameraPage> {
           recognizedText: extractedText,
         ),
       );
+    } on PlatformException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Camera error: ${e.code}${e.message != null ? ' — ${e.message}' : ''}';
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() {
