@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'screens/auth/caregiver_login_screen.dart';
+import 'screens/auth/caregiver_signup_screen.dart';
 import 'screens/auth/elderly_login_screen.dart';
+import 'screens/auth/elderly_signup_screen.dart';
 import 'screens/auth/signup_screen.dart';
 import 'screens/dashboard/dashboard_right_screen.dart';
 import 'screens/dashboard/dashboard_screen.dart';
@@ -70,6 +72,14 @@ final appRouter = GoRouter(
       GoRoute(
         path: '/signup',
         builder: (context, state) => const SignupScreen(),
+      ),
+      GoRoute(
+        path: '/signup/elderly',
+        builder: (context, state) => const ElderlySignupScreen(),
+      ),
+      GoRoute(
+        path: '/signup/caregiver',
+        builder: (context, state) => const CaregiverSignupScreen(),
       ),
       GoRoute(
         path: '/role',

@@ -251,6 +251,12 @@ class _CaregiverLoginScreenState extends State<CaregiverLoginScreen>
                           child: const Text('I am an elderly user'),
                         ),
                       ),
+                      Center(
+                        child: TextButton(
+                          onPressed: () => context.push('/signup/caregiver'),
+                          child: const Text('Create an account'),
+                        ),
+                      ),
                     ],
                   ),
                 ),

@@ -5,15 +5,16 @@ import 'package:provider/provider.dart';
 
 import '../../state/session_store.dart';
 
-class ElderlyLoginScreen extends StatefulWidget {
-  const ElderlyLoginScreen({super.key});
+class ElderlySignupScreen extends StatefulWidget {
+  const ElderlySignupScreen({super.key});
 
   @override
-  State<ElderlyLoginScreen> createState() => _ElderlyLoginScreenState();
+  State<ElderlySignupScreen> createState() => _ElderlySignupScreenState();
 }
 
-class _ElderlyLoginScreenState extends State<ElderlyLoginScreen>
+class _ElderlySignupScreenState extends State<ElderlySignupScreen>
     with SingleTickerProviderStateMixin {
+  final _name = TextEditingController();
   final _email = TextEditingController();
   final _password = TextEditingController();
   bool _obscurePassword = true;
@@ -39,6 +40,7 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen>
 
   @override
   void dispose() {
+    _name.dispose();
     _email.dispose();
     _password.dispose();
     _controller.dispose();
@@ -46,7 +48,7 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen>
   }
 
   Future<void> _submit() async {
-    // MVP: no credentials required yet — just store role + go to dashboard.
+    // MVP: no real account creation yet — just continue into the elderly flow.
     HapticFeedback.lightImpact();
     final session = context.read<SessionStore>();
     await session.setRole('elderly');
@@ -94,7 +96,7 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen>
                       GestureDetector(
                         onTap: () {
                           HapticFeedback.lightImpact();
-                          context.go('/');
+                          context.pop();
                         },
                         child: Container(
                           width: 42,
@@ -148,14 +150,14 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen>
                                 ],
                               ),
                               child: const Icon(
-                                Icons.favorite_rounded,
+                                Icons.person_add_alt_1_rounded,
                                 color: Colors.white,
                                 size: 40,
                               ),
                             ),
                             const SizedBox(height: 16),
                             const Text(
-                              'Elderly sign in',
+                              'Create your account',
                               style: TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.w800,
@@ -164,12 +166,13 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen>
                             ),
                             const SizedBox(height: 6),
                             const Text(
-                              'Continue to your dashboard.',
+                              'This helps your caregiver support you.\n(We can keep it simple for now.)',
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                 fontSize: 13,
                                 color: Color(0xFF8A94A6),
                                 fontWeight: FontWeight.w500,
+                                height: 1.25,
                               ),
                             ),
                           ],
@@ -196,6 +199,15 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
+                            _StyledTextField(
+                              controller: _name,
+                              label: 'Your name',
+                              icon: Icons.badge_outlined,
+                              accentColor: const Color(0xFF4A90D9),
+                              keyboardType: TextInputType.name,
+                              textInputAction: TextInputAction.next,
+                            ),
+                            const SizedBox(height: 14),
                             _StyledTextField(
                               controller: _email,
                               label: 'Email address',
@@ -228,7 +240,7 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen>
                             ),
                             const SizedBox(height: 20),
                             _GradientButton(
-                              label: 'Sign in',
+                              label: 'Create account',
                               enabled: true,
                               gradient: const LinearGradient(
                                 begin: Alignment.topLeft,
@@ -247,14 +259,8 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen>
                       const SizedBox(height: 20),
                       Center(
                         child: TextButton(
-                          onPressed: () => context.go('/login/caregiver'),
-                          child: const Text('I am a caregiver'),
-                        ),
-                      ),
-                      Center(
-                        child: TextButton(
-                          onPressed: () => context.push('/signup/elderly'),
-                          child: const Text('Create an account'),
+                          onPressed: () => context.pop(),
+                          child: const Text('I already have an account'),
                         ),
                       ),
                     ],
