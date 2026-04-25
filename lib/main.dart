@@ -7,16 +7,10 @@ import 'notifications/notification_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-
   // If Firebase isn't configured for the current platform (e.g. web),
   // don't crash the whole app before any UI can render.
   try {
-    if (kIsWeb) {
-      // FlutterFire requires web options; if they're missing, initialization throws.
-      // We still allow the app UI to load for local development.
-      await Firebase.initializeApp();
-    } else {
+    if (!kIsWeb) {
       await Firebase.initializeApp(
         options: DefaultFirebaseOptions.currentPlatform,
       );
@@ -24,6 +18,8 @@ Future<void> main() async {
   } catch (e) {
     debugPrint('Firebase initialization failed: $e');
   }
-  await NotificationService.instance.init();
+  if (!kIsWeb) {
+    await NotificationService.instance.init();
+  }
   runApp(const PillPalsApp());
 }
