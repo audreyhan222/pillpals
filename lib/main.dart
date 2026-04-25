@@ -7,6 +7,7 @@ import 'notifications/notification_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   // If Firebase isn't configured for the current platform (e.g. web),
   // don't crash the whole app before any UI can render.
