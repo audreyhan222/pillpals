@@ -3,6 +3,8 @@ uvicorn[standard]
 sqlmodel
 python-jose[cryptography]
 passlib[bcrypt]
+bcrypt<4
 pydantic-settings
 pydantic[email]
 python-multipart
+firebase-admin

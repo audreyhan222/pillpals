@@ -3,6 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../../api/api_client.dart';
+import '../../api/endpoints.dart';
+import '../../state/api_config_store.dart';
 import '../../state/session_store.dart';
 
 class ElderlyLoginScreen extends StatefulWidget {
@@ -17,6 +20,8 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen>
   final _email = TextEditingController();
   final _password = TextEditingController();
   bool _obscurePassword = true;
+  bool _loading = false;
+  String? _error;
 
   late final AnimationController _controller;
   late final Animation<double> _opacity;
@@ -46,12 +51,37 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen>
   }
 
   Future<void> _submit() async {
-    // MVP: no credentials required yet — just store role + go to dashboard.
     HapticFeedback.lightImpact();
-    final session = context.read<SessionStore>();
-    await session.setRole('elderly');
-    if (!mounted) return;
-    context.go('/dashboard');
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      final baseUrl = context.read<ApiConfigStore>().baseUrl;
+      final api = ApiClient(baseUrl: baseUrl);
+      final res = await api.dio.post(ApiEndpoints.login, data: {
+        'email': _email.text.trim(),
+        'password': _password.text,
+      });
+      final data = res.data as Map<String, dynamic>;
+      final token = data['access_token'] as String?;
+      if (token == null || token.isEmpty) throw Exception('Missing token');
+
+      if (!mounted) return;
+      final session = context.read<SessionStore>();
+      await session.setToken(token);
+      await session.setRole('elderly');
+      if (!mounted) return;
+      context.go('/dashboard');
+    } catch (e) {
+      setState(
+        () => _error =
+            'Login failed. Check email/password and ensure the backend URL is reachable (Dev page).',
+      );
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   @override
@@ -229,7 +259,7 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen>
                             const SizedBox(height: 20),
                             _GradientButton(
                               label: 'Log in',
-                              enabled: true,
+                              enabled: !_loading,
                               gradient: const LinearGradient(
                                 begin: Alignment.topLeft,
                                 end: Alignment.bottomRight,
@@ -241,6 +271,16 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen>
                               shadowColor: const Color(0xFFE5A800).withValues(alpha: 0.30),
                               onTap: _submit,
                             ),
+                            if (_error != null) ...[
+                              const SizedBox(height: 12),
+                              Text(
+                                _error!,
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.error,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                       ),

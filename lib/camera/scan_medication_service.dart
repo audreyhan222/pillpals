@@ -19,8 +19,13 @@ class ScanMedicationAiResult {
 }
 
 class ScanMedicationService {
-  ScanMedicationService({String? token})
-      : _api = ApiClient(baseUrl: AppConfig.apiBaseUrl, token: token);
+  ScanMedicationService({String? token, String? baseUrl})
+      : _api = ApiClient(
+          baseUrl: (baseUrl == null || baseUrl.trim().isEmpty)
+              ? AppConfig.apiBaseUrl
+              : baseUrl.trim(),
+          token: token,
+        );
 
   final ApiClient _api;
 

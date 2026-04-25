@@ -125,3 +125,18 @@ class ScanMedicationOut(BaseModel):
     dosage: str
     instructions: str
 
+
+class PushTokenIn(BaseModel):
+    token: str
+    platform: str = "ios"
+
+
+class PushTokenOut(BaseModel):
+    ok: bool = True
+
+
+class DevPushIn(BaseModel):
+    title: str = "PillPal (Dev)"
+    body: str = "This is a dev-triggered push notification."
+    data: Optional[dict] = None
+

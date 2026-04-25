@@ -1,4 +1,4 @@
-#!/Users/gavgavgav/Documents/GitHub/pillpals/backend/.venv/bin/python3
+#!/Users/skirio/Documents/GitHub/pillpals/backend/.venv/bin/python
 # -*- coding: utf-8 -*-
 import re
 import sys

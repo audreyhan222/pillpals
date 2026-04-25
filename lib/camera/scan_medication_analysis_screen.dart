@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../firestore/medication_repository.dart';
 import '../notifications/notification_service.dart';
+import '../state/api_config_store.dart';
 import '../state/session_store.dart';
 import 'pill_details.dart';
 import 'pill_details_parser.dart';
@@ -118,7 +119,8 @@ class _ScanMedicationAnalysisScreenState extends State<ScanMedicationAnalysisScr
 
     try {
       final token = context.read<SessionStore>().token;
-      final service = ScanMedicationService(token: token);
+      final baseUrl = context.read<ApiConfigStore>().baseUrl;
+      final service = ScanMedicationService(token: token, baseUrl: baseUrl);
       final res = await service.analyzeText(text: widget.input.recognizedText);
 
       final merged = _local.copyWith(

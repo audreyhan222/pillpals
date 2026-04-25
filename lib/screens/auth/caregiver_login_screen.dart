@@ -1,9 +1,11 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../../api/api_client.dart';
+import '../../api/endpoints.dart';
+import '../../state/api_config_store.dart';
 import '../../state/session_store.dart';
 
 class CaregiverLoginScreen extends StatefulWidget {
@@ -62,26 +64,27 @@ class _CaregiverLoginScreenState extends State<CaregiverLoginScreen>
     HapticFeedback.lightImpact();
 
     try {
-      // Query Firestore: users → caretaker document where username matches
-      final query = await FirebaseFirestore.instance
-          .collection('users')
-          .where('username', isEqualTo: _email.text.trim())
-          .where('password', isEqualTo: _password.text)
-          .limit(1)
-          .get();
+      final baseUrl = context.read<ApiConfigStore>().baseUrl;
+      final api = ApiClient(baseUrl: baseUrl);
+      final res = await api.dio.post(ApiEndpoints.login, data: {
+        'email': _email.text.trim(),
+        'password': _password.text,
+      });
+      final data = res.data as Map<String, dynamic>;
+      final token = data['access_token'] as String?;
+      if (token == null || token.isEmpty) throw Exception('Missing token');
 
-      if (query.docs.isEmpty) {
-        setState(() => _error = 'Invalid username or password. Please try again.');
-        return;
-      }
-
-      // Credentials matched — proceed
+      if (!mounted) return;
       final session = context.read<SessionStore>();
+      await session.setToken(token);
       await session.setRole('caregiver');
       if (!mounted) return;
       context.go('/caregiver');
     } catch (e) {
-      setState(() => _error = 'Something went wrong. Please try again.');
+      setState(
+        () => _error =
+            'Login failed. Check email/password and ensure the backend URL is reachable (Dev page).',
+      );
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -234,6 +237,7 @@ class _CaregiverLoginScreenState extends State<CaregiverLoginScreen>
                               label: 'Username',
                               icon: Icons.person_outline_rounded,
                               accentColor: const Color(0xFF4A90D9),
+                              keyboardType: TextInputType.text,
                               textInputAction: TextInputAction.next,
                             ),
                             const SizedBox(height: 14),
@@ -243,6 +247,7 @@ class _CaregiverLoginScreenState extends State<CaregiverLoginScreen>
                               icon: Icons.lock_outline_rounded,
                               accentColor: const Color(0xFF4A90D9),
                               obscureText: _obscurePassword,
+                              keyboardType: TextInputType.visiblePassword,
                               textInputAction: TextInputAction.done,
                               onSubmitted: (_) => _submit(),
                               suffixIcon: GestureDetector(
