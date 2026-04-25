@@ -77,7 +77,7 @@ class _PortalLoginPageState extends State<PortalLoginPage>
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              _soft.withOpacity(0.35),
+              _soft.withValues(alpha: 0.35),
               Colors.white,
             ],
           ),
@@ -134,15 +134,15 @@ class _PortalLoginPageState extends State<PortalLoginPage>
                       child: Container(
                         padding: const EdgeInsets.all(18),
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.85),
+                          color: Colors.white.withValues(alpha: 0.85),
                           borderRadius: BorderRadius.circular(22),
                           border: Border.all(
-                            color: _accent.withOpacity(0.18),
+                            color: _accent.withValues(alpha: 0.18),
                             width: 1.2,
                           ),
                           boxShadow: [
                             BoxShadow(
-                              color: _accent.withOpacity(0.10),
+                              color: _accent.withValues(alpha: 0.10),
                               blurRadius: 28,
                               offset: const Offset(0, 18),
                             ),
@@ -159,7 +159,7 @@ class _PortalLoginPageState extends State<PortalLoginPage>
                                 labelText: 'Email',
                                 prefixIcon: const Icon(Icons.email_outlined),
                                 filled: true,
-                                fillColor: _soft.withOpacity(0.18),
+                                fillColor: _soft.withValues(alpha: 0.18),
                               ),
                             ),
                             const SizedBox(height: 14),
@@ -171,7 +171,7 @@ class _PortalLoginPageState extends State<PortalLoginPage>
                                 labelText: 'Password',
                                 prefixIcon: const Icon(Icons.lock_outline_rounded),
                                 filled: true,
-                                fillColor: _soft.withOpacity(0.18),
+                                fillColor: _soft.withValues(alpha: 0.18),
                               ),
                             ),
                             const SizedBox(height: 18),
@@ -260,9 +260,9 @@ class _FeatureChips extends StatelessWidget {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.75),
+          color: Colors.white.withValues(alpha: 0.75),
           borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: accent.withOpacity(0.18)),
+          border: Border.all(color: accent.withValues(alpha: 0.18)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,

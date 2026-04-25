@@ -63,7 +63,7 @@ class _RoleCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return Material(
-      color: cs.surfaceVariant,
+      color: cs.surfaceContainerHighest,
       borderRadius: BorderRadius.circular(18),
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
@@ -74,7 +74,7 @@ class _RoleCard extends StatelessWidget {
             children: [
               CircleAvatar(
                 radius: 24,
-                backgroundColor: cs.primary.withOpacity(0.12),
+                backgroundColor: cs.primary.withValues(alpha: 0.12),
                 child: Icon(Icons.person, color: cs.primary),
               ),
               const SizedBox(width: 14),

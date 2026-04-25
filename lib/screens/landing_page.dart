@@ -157,7 +157,7 @@ class _LandingPageState extends State<LandingPage>
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.blue.withOpacity(0.15),
+                color: Colors.blue.withValues(alpha: 0.15),
                 blurRadius: 24,
                 offset: const Offset(0, 8),
               ),
