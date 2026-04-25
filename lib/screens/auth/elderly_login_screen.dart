@@ -155,7 +155,7 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen>
                             ),
                             const SizedBox(height: 16),
                             const Text(
-                              'Elderly sign in',
+                              'Elderly log in',
                               style: TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.w800,
@@ -228,7 +228,7 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen>
                             ),
                             const SizedBox(height: 20),
                             _GradientButton(
-                              label: 'Sign in',
+                              label: 'Log in',
                               enabled: true,
                               gradient: const LinearGradient(
                                 begin: Alignment.topLeft,

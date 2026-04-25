@@ -29,8 +29,9 @@ final appRouter = GoRouter(
       final session = context.read<SessionStore>();
       if (!session.bootstrapped) return null;
 
-      final isLoggingIn =
-          state.matchedLocation.startsWith('/login') || state.matchedLocation == '/signup';
+      final isLoggingIn = state.matchedLocation.startsWith('/login') ||
+          state.matchedLocation == '/signup' ||
+          state.matchedLocation.startsWith('/signup');
       final isRolePick = state.matchedLocation == '/role';
       // For now, dashboard is public (no credentials required yet).
       final isPublic = state.matchedLocation == '/' ||
