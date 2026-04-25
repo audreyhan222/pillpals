@@ -13,6 +13,7 @@ import 'screens/reminder/reminder_screen.dart';
 import 'screens/shell/home_shell.dart';
 import 'state/session_store.dart';
 import 'camera/pill_bottle_camera_page.dart';
+import 'camera/scan_medication_analysis_screen.dart';
 
 final rootNavigatorKey = GlobalKey<NavigatorState>();
 
@@ -32,7 +33,9 @@ final appRouter = GoRouter(
           state.matchedLocation == '/reminder' ||
           state.matchedLocation == '/dashboard' ||
           state.matchedLocation == '/dashboard/left' ||
-          state.matchedLocation == '/dashboard/right';
+          state.matchedLocation == '/dashboard/right' ||
+          state.matchedLocation == '/scan' ||
+          state.matchedLocation == '/scan/analysis';
 
       if (!session.isAuthed && !isPublic) {
         return '/login';
@@ -83,6 +86,18 @@ final appRouter = GoRouter(
       GoRoute(
         path: '/scan',
         builder: (context, state) => const PillBottleCameraPage(),
+      ),
+      GoRoute(
+        path: '/scan/analysis',
+        builder: (context, state) {
+          final input = state.extra;
+          if (input is! ScanMedicationInput) {
+            return const Scaffold(
+              body: Center(child: Text('Missing scan data. Please try again.')),
+            );
+          }
+          return ScanMedicationAnalysisScreen(input: input);
+        },
       ),
     ],
   );

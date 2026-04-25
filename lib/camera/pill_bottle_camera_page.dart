@@ -2,9 +2,11 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:go_router/go_router.dart';
 
 import 'pill_bottle_text_recognizer.dart';
 import 'pill_details_parser.dart';
+import 'scan_medication_analysis_screen.dart';
 
 class PillBottleCameraPage extends StatefulWidget {
   const PillBottleCameraPage({super.key});
@@ -71,6 +73,16 @@ class _PillBottleCameraPageState extends State<PillBottleCameraPage> {
           ..clear()
           ..addAll(parsed.times);
       });
+
+      // Immediately hand off to the AI analysis screen (it falls back to local parsing if AI fails).
+      if (!mounted) return;
+      context.push(
+        '/scan/analysis',
+        extra: ScanMedicationInput(
+          imageFile: file,
+          recognizedText: extractedText,
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() {
