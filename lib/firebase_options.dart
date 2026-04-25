@@ -54,10 +54,11 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyCv1EIY3EHOeoj6zVBd48UW2WUTLBbJW9Y',
-    appId: '1:725260058110:ios:41e84d2545200cbb4c94af',
+    appId: '1:725260058110:ios:2fa82759653d946a4c94af',
     messagingSenderId: '725260058110',
     projectId: 'pillpals-ad8c1',
     storageBucket: 'pillpals-ad8c1.firebasestorage.app',
-    iosBundleId: 'com.example.pillpal',
+    iosBundleId: 'com.audreyhan222.myapp',
   );
+
 }
