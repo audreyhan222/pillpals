@@ -274,6 +274,21 @@ class _DashboardScreenState extends State<DashboardScreen>
                 ),
               ),
 
+              // Elderly-only: quick scan shortcut
+              if (!isCaregiver)
+                Positioned(
+                  top: 66,
+                  right: 12,
+                  child: _CircleNavButton(
+                    icon: Icons.camera_alt_rounded,
+                    label: 'Scan',
+                    onTap: () {
+                      HapticFeedback.lightImpact();
+                      context.push('/scan');
+                    },
+                  ),
+                ),
+
               // Bottom pills panel
               Align(
                 alignment: Alignment.bottomCenter,

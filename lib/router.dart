@@ -12,6 +12,7 @@ import 'screens/role/role_select_screen.dart';
 import 'screens/reminder/reminder_screen.dart';
 import 'screens/shell/home_shell.dart';
 import 'state/session_store.dart';
+import 'camera/pill_bottle_camera_page.dart';
 
 final rootNavigatorKey = GlobalKey<NavigatorState>();
 
@@ -78,6 +79,10 @@ final appRouter = GoRouter(
       GoRoute(
         path: '/reminder',
         builder: (context, state) => ReminderScreen(payload: state.uri.queryParameters['p']),
+      ),
+      GoRoute(
+        path: '/scan',
+        builder: (context, state) => const PillBottleCameraPage(),
       ),
     ],
   );
