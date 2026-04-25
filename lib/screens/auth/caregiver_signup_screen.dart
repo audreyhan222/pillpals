@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -15,9 +16,11 @@ class CaregiverSignupScreen extends StatefulWidget {
 class _CaregiverSignupScreenState extends State<CaregiverSignupScreen>
     with SingleTickerProviderStateMixin {
   final _name = TextEditingController();
-  final _email = TextEditingController();
+  final _username = TextEditingController();
   final _password = TextEditingController();
   bool _obscurePassword = true;
+  bool _loading = false;
+  String? _error;
 
   late final AnimationController _controller;
   late final Animation<double> _opacity;
@@ -41,19 +44,60 @@ class _CaregiverSignupScreenState extends State<CaregiverSignupScreen>
   @override
   void dispose() {
     _name.dispose();
-    _email.dispose();
+    _username.dispose();
     _password.dispose();
     _controller.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
-    // MVP: no real account creation yet — just continue into the caregiver flow.
+    if (_name.text.trim().isEmpty ||
+        _username.text.trim().isEmpty ||
+        _password.text.isEmpty) {
+      setState(() => _error = 'Please fill in all fields.');
+      return;
+    }
+
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
     HapticFeedback.lightImpact();
-    final session = context.read<SessionStore>();
-    await session.setRole('caregiver');
-    if (!mounted) return;
-    context.go('/caregiver');
+
+    try {
+      final username = _username.text.trim();
+
+      // Check if username already exists
+      final existing = await FirebaseFirestore.instance
+          .collection('caretakers')
+          .doc(username)
+          .get();
+
+      if (existing.exists) {
+        setState(() => _error = 'That username is already taken. Please choose another.');
+        return;
+      }
+
+      // Create document in caretakers collection with username as the doc ID
+      await FirebaseFirestore.instance
+          .collection('caretakers')
+          .doc(username)
+          .set({
+        'name': _name.text.trim(),
+        'password': _password.text,
+        'patients': [],
+      });
+
+      final session = context.read<SessionStore>();
+      await session.setRole('caregiver');
+      if (!mounted) return;
+      context.go('/caregiver');
+    } catch (e) {
+      setState(() => _error = 'Something went wrong. Please try again.');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   @override
@@ -210,11 +254,10 @@ class _CaregiverSignupScreenState extends State<CaregiverSignupScreen>
                             ),
                             const SizedBox(height: 14),
                             _StyledTextField(
-                              controller: _email,
-                              label: 'Email address',
-                              icon: Icons.email_outlined,
+                              controller: _username,
+                              label: 'Username',
+                              icon: Icons.person_outline_rounded,
                               accentColor: const Color(0xFF4A90D9),
-                              keyboardType: TextInputType.emailAddress,
                               textInputAction: TextInputAction.next,
                             ),
                             const SizedBox(height: 14),
@@ -239,10 +282,49 @@ class _CaregiverSignupScreenState extends State<CaregiverSignupScreen>
                                 ),
                               ),
                             ),
+
+                            // ── Error message ──────────────────────
+                            if (_error != null) ...[
+                              const SizedBox(height: 14),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 10,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFFFEDED),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: const Color(0xFFFFB3B3),
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.error_outline_rounded,
+                                      color: Color(0xFFD94A4A),
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        _error!,
+                                        style: const TextStyle(
+                                          color: Color(0xFFD94A4A),
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+
                             const SizedBox(height: 20),
                             _GradientButton(
                               label: 'Create account',
-                              enabled: true,
+                              enabled: !_loading,
                               gradient: const LinearGradient(
                                 begin: Alignment.topLeft,
                                 end: Alignment.bottomRight,
@@ -253,7 +335,7 @@ class _CaregiverSignupScreenState extends State<CaregiverSignupScreen>
                               ),
                               shadowColor: const Color(0xFF4A90D9)
                                   .withValues(alpha: 0.35),
-                              onTap: _submit,
+                              onTap: _loading ? null : _submit,
                             ),
                           ],
                         ),
@@ -261,7 +343,7 @@ class _CaregiverSignupScreenState extends State<CaregiverSignupScreen>
                       const SizedBox(height: 20),
                       Center(
                         child: TextButton(
-                          onPressed: () => context.pop(),
+                          onPressed: _loading ? null : () => context.pop(),
                           child: const Text('I already have an account'),
                         ),
                       ),
@@ -429,15 +511,24 @@ class _GradientButtonState extends State<_GradientButton>
               ],
             ),
             child: Center(
-              child: Text(
-                widget.label,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.3,
-                ),
-              ),
+              child: widget.enabled
+                  ? Text(
+                      widget.label,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.3,
+                      ),
+                    )
+                  : const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    ),
             ),
           ),
         ),
@@ -445,4 +536,3 @@ class _GradientButtonState extends State<_GradientButton>
     );
   }
 }
-
