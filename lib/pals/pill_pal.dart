@@ -23,7 +23,7 @@ class PillPal {
   final Color color;
 
   String assetFor(PalExpression expression) {
-    return 'assets/pals/$id/${expression.fileName}.png';
+    return 'assets/pals/$id/${expression.fileName}.gif';
   }
 }
 

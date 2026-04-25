@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -17,9 +18,11 @@ class ElderlyLoginScreen extends StatefulWidget {
 
 class _ElderlyLoginScreenState extends State<ElderlyLoginScreen>
     with SingleTickerProviderStateMixin {
-  final _email = TextEditingController();
+  final _username = TextEditingController();
   final _password = TextEditingController();
   bool _obscurePassword = true;
+  bool _loading = false;
+  String? _error;
   bool _loading = false;
   String? _error;
 
@@ -44,14 +47,47 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen>
 
   @override
   void dispose() {
-    _email.dispose();
+    _username.dispose();
     _password.dispose();
     _controller.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
+    if (_username.text.trim().isEmpty || _password.text.isEmpty) {
+      setState(() => _error = 'Please enter your username and password.');
+      return;
+    }
+
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
     HapticFeedback.lightImpact();
+
+    try {
+      final query = await FirebaseFirestore.instance
+          .collection('users')
+          .where('username', isEqualTo: _username.text.trim())
+          .where('password', isEqualTo: _password.text)
+          .limit(1)
+          .get();
+
+      if (query.docs.isEmpty) {
+        setState(() => _error = 'Invalid username or password. Please try again.');
+        return;
+      }
+
+      final session = context.read<SessionStore>();
+      await session.setRole('elderly');
+      if (!mounted) return;
+      context.go('/dashboard');
+    } catch (e) {
+      setState(() => _error = 'Something went wrong. Please try again.');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
     setState(() {
       _loading = true;
       _error = null;
@@ -227,11 +263,10 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen>
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             _StyledTextField(
-                              controller: _email,
-                              label: 'Email address',
-                              icon: Icons.email_outlined,
+                              controller: _username,
+                              label: 'Username',
+                              icon: Icons.person_outline_rounded,
                               accentColor: const Color(0xFF4A90D9),
-                              keyboardType: TextInputType.emailAddress,
                               textInputAction: TextInputAction.next,
                             ),
                             const SizedBox(height: 14),
@@ -256,9 +291,49 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen>
                                 ),
                               ),
                             ),
+
+                            // ── Error message ──────────────────────
+                            if (_error != null) ...[
+                              const SizedBox(height: 14),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 10,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFFFEDED),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: const Color(0xFFFFB3B3),
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.error_outline_rounded,
+                                      color: Color(0xFFD94A4A),
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        _error!,
+                                        style: const TextStyle(
+                                          color: Color(0xFFD94A4A),
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+
                             const SizedBox(height: 20),
                             _GradientButton(
                               label: 'Log in',
+                              enabled: !_loading,
                               enabled: !_loading,
                               gradient: const LinearGradient(
                                 begin: Alignment.topLeft,
@@ -269,7 +344,7 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen>
                                 ],
                               ),
                               shadowColor: const Color(0xFFE5A800).withValues(alpha: 0.30),
-                              onTap: _submit,
+                              onTap: _loading ? null : _submit,
                             ),
                             if (_error != null) ...[
                               const SizedBox(height: 12),
@@ -287,13 +362,13 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen>
                       const SizedBox(height: 20),
                       Center(
                         child: TextButton(
-                          onPressed: () => context.go('/login/caregiver'),
+                          onPressed: _loading ? null : () => context.go('/login/caregiver'),
                           child: const Text('I am a caregiver'),
                         ),
                       ),
                       Center(
                         child: TextButton(
-                          onPressed: () => context.push('/signup/elderly'),
+                          onPressed: _loading ? null : () => context.push('/signup/elderly'),
                           child: const Text('Create an account'),
                         ),
                       ),
@@ -461,15 +536,24 @@ class _GradientButtonState extends State<_GradientButton>
               ],
             ),
             child: Center(
-              child: Text(
-                widget.label,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.3,
-                ),
-              ),
+              child: widget.enabled
+                  ? Text(
+                      widget.label,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.3,
+                      ),
+                    )
+                  : const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    ),
             ),
           ),
         ),
@@ -477,4 +561,3 @@ class _GradientButtonState extends State<_GradientButton>
     );
   }
 }
-
