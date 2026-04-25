@@ -5,7 +5,6 @@ import 'package:provider/provider.dart';
 import 'screens/auth/caregiver_login_screen.dart';
 import 'screens/auth/elderly_login_screen.dart';
 import 'screens/auth/signup_screen.dart';
-import 'screens/dashboard/dashboard_left_screen.dart';
 import 'screens/dashboard/dashboard_right_screen.dart';
 import 'screens/dashboard/dashboard_screen.dart';
 import 'screens/role/landing_page.dart';
@@ -37,7 +36,6 @@ final appRouter = GoRouter(
           isRolePick ||
           state.matchedLocation == '/reminder' ||
           state.matchedLocation == '/dashboard' ||
-          state.matchedLocation == '/dashboard/left' ||
           state.matchedLocation == '/dashboard/right' ||
           state.matchedLocation == '/scan' ||
           state.matchedLocation == '/scan/analysis' ||
@@ -80,10 +78,6 @@ final appRouter = GoRouter(
       GoRoute(
         path: '/dashboard',
         builder: (context, state) => const DashboardScreen(),
-      ),
-      GoRoute(
-        path: '/dashboard/left',
-        builder: (context, state) => const DashboardLeftScreen(),
       ),
       GoRoute(
         path: '/dashboard/right',

@@ -125,6 +125,14 @@ class _CaregiverElderlySelectionScreenState
               children: [
                 Row(
                   children: [
+                    _GlassIconButton(
+                      icon: Icons.arrow_back_rounded,
+                      onTap: () {
+                        HapticFeedback.lightImpact();
+                        context.go('/');
+                      },
+                    ),
+                    const SizedBox(width: 10),
                     const Expanded(
                       child: Text(
                         'Your people',

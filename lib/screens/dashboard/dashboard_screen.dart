@@ -5,7 +5,11 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../../pals/pill_pal.dart';
+import '../../state/pill_completion_store.dart';
 import '../../state/session_store.dart';
+import '../../tamagotchi_backend/tamagotchi_expression_engine.dart';
+import '../../tamagotchi_backend/tamagotchi_timer_service.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -17,6 +21,13 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _petController;
+  late final TamagotchiExpressionEngine _engine;
+  late final TamagotchiTimerService _timer;
+
+  PillPal? _selectedPal;
+  String _palName = 'Pal';
+  PalExpression _expression = PalExpression.neutral;
+  bool _petPromptShown = false;
 
   final _todayPills = const <_PillItem>[
     _PillItem(
@@ -55,16 +66,97 @@ class _DashboardScreenState extends State<DashboardScreen>
       vsync: this,
       duration: const Duration(milliseconds: 2400),
     )..repeat();
+
+    _engine = TamagotchiExpressionEngine(expectedDoseCount: _todayPills.length);
+    for (final pill in _todayPills) {
+      _engine.registerDoseNotification(doseId: pill.doseId);
+    }
+    _timer = TamagotchiTimerService(
+      engine: _engine,
+      tickInterval: const Duration(seconds: 10),
+      onExpressionChanged: (expr) {
+        if (!mounted) return;
+        setState(() => _expression = expr);
+      },
+    )..start();
   }
 
   @override
   void dispose() {
     _petController.dispose();
+    _timer.dispose();
     super.dispose();
+  }
+
+  Future<void> _maybePromptForPet() async {
+    if (_selectedPal != null || _petPromptShown) return;
+    _petPromptShown = true;
+
+    final selected = await showDialog<_PalSelection>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return const _PetPickerDialog();
+      },
+    );
+
+    if (!mounted) return;
+    if (selected == null) return;
+    setState(() {
+      _selectedPal = selected.pal;
+      _palName = selected.name;
+    });
+  }
+
+  Future<void> _promptRenamePal() async {
+    final controller = TextEditingController(text: _palName);
+    try {
+      final name = await showDialog<String>(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: const Text(
+              'Rename your Pal',
+              style: TextStyle(fontWeight: FontWeight.w900),
+            ),
+            content: TextField(
+              controller: controller,
+              autofocus: true,
+              textInputAction: TextInputAction.done,
+              decoration: const InputDecoration(
+                labelText: 'Name',
+                hintText: 'e.g. Sunny',
+              ),
+              onSubmitted: (_) => Navigator.of(context).pop(controller.text),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(controller.text),
+                child: const Text('Save'),
+              ),
+            ],
+          );
+        },
+      );
+
+      final trimmed = (name ?? '').trim();
+      if (!mounted) return;
+      if (trimmed.isEmpty) return;
+      setState(() => _palName = trimmed);
+    } finally {
+      controller.dispose();
+    }
   }
 
   Future<void> _showPillDetails(_PillItem pill) async {
     HapticFeedback.lightImpact();
+    final store = context.read<PillCompletionStore>();
+    final today = DateTime.now();
+    final alreadyTaken = store.isDoseTaken(date: today, doseId: pill.doseId);
     await showModalBottomSheet<void>(
       context: context,
       useSafeArea: true,
@@ -146,9 +238,35 @@ class _DashboardScreenState extends State<DashboardScreen>
                   const SizedBox(height: 16),
                   SizedBox(
                     width: double.infinity,
-                    child: FilledButton(
-                      onPressed: () => context.pop(),
-                      child: const Text('Got it'),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        FilledButton.icon(
+                          onPressed: alreadyTaken
+                              ? null
+                              : () async {
+                                  await store.markDoseTaken(
+                                    date: today,
+                                    doseId: pill.doseId,
+                                  );
+                                  _engine.registerDoseTaken(doseId: pill.doseId);
+                                  if (!mounted) return;
+                                  setState(() => _expression = _engine.expression);
+                                  if (context.mounted) context.pop();
+                                },
+                          icon: Icon(
+                            alreadyTaken
+                                ? Icons.check_circle_rounded
+                                : Icons.check_rounded,
+                          ),
+                          label: Text(alreadyTaken ? 'Taken today' : 'Mark as taken'),
+                        ),
+                        const SizedBox(height: 10),
+                        FilledButton(
+                          onPressed: () => context.pop(),
+                          child: const Text('Close'),
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -175,6 +293,10 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
 
     final isCaregiver = role == 'caregiver';
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _maybePromptForPet();
+    });
 
     return Scaffold(
       body: Container(
@@ -205,72 +327,131 @@ class _DashboardScreenState extends State<DashboardScreen>
                       final t = _petController.value * 2 * math.pi;
                       final bob = math.sin(t) * 6;
                       final tilt = math.sin(t) * 0.03;
-                      return Transform.translate(
-                        offset: Offset(0, bob),
-                        child: Transform.rotate(
-                          angle: tilt,
-                          child: _PetCard(
-                            accent: cs.primary,
-                            statusText: isCaregiver
-                                ? 'I’m ready to help you today'
-                                : 'I’m ready to help you today',
+                      final petAssetPath =
+                          (_selectedPal ?? availablePillPals.first).assetFor(_expression);
+
+                      final palId =
+                          (_selectedPal ?? availablePillPals.first).id.toLowerCase();
+                      final spriteScale = (palId == 'cat' || palId == 'penguin')
+                          ? 1.10
+                          : 1.00;
+
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Transform.translate(
+                            // Move the sprite up, but keep the name stable.
+                            offset: Offset(0, bob - 140),
+                            child: Transform.rotate(
+                              angle: tilt,
+                              child: Transform.scale(
+                                scale: spriteScale,
+                                child: _FloatingPalSprite(
+                                  accent: cs.primary,
+                                  petAssetPath: petAssetPath,
+                                ),
+                              ),
+                            ),
                           ),
-                        ),
+                        ],
                       );
                     },
                   ),
                 ),
               ),
 
+              // Pal name badge centered at top
+              Positioned(
+                top: 22,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 210),
+                    child: _PalNameBadge(
+                      name: _palName,
+                      onTap: () {
+                        HapticFeedback.lightImpact();
+                        _promptRenamePal();
+                      },
+                    ),
+                  ),
+                ),
+              ),
+
               // Top-left circular button
               Positioned(
-                top: 12,
-                left: 12,
+                top: 14,
+                left: 14,
                 child: _CircleNavButton(
-                  icon: Icons.settings_rounded,
-                  label: 'Left',
+                  icon: Icons.arrow_back_rounded,
+                  label: 'Back to landing',
                   onTap: () {
                     HapticFeedback.lightImpact();
-                    context.push('/dashboard/left');
+                    context.go('/');
                   },
                 ),
               ),
 
               // Top-right circular button
-              Positioned(
-                top: 12,
-                right: 12,
-                child: _CircleNavButton(
-                  icon: Icons.notifications_rounded,
-                  label: 'Right',
-                  onTap: () {
-                    HapticFeedback.lightImpact();
-                    context.push('/dashboard/right');
-                  },
-                ),
-              ),
-
-              // Elderly-only: quick scan shortcut
-              if (!isCaregiver)
+              if (isCaregiver)
                 Positioned(
-                  top: 66,
-                  right: 12,
+                  top: 14,
+                  right: 14,
                   child: _CircleNavButton(
-                    icon: Icons.camera_alt_rounded,
-                    label: 'Scan',
+                    icon: Icons.local_fire_department_rounded,
+                    label: 'Notifications',
                     onTap: () {
                       HapticFeedback.lightImpact();
-                      context.push('/scan');
+                      context.push('/dashboard/right');
                     },
                   ),
                 ),
 
+              // Elderly-only: quick scan shortcut
+              if (!isCaregiver)
+                ...[
+                  // Swapped: Scan is now top-right.
+                  Positioned(
+                    top: 14,
+                    right: 14,
+                    child: _CircleNavButton(
+                      icon: Icons.camera_alt_rounded,
+                      label: 'Scan',
+                      onTap: () {
+                        HapticFeedback.lightImpact();
+                        context.push('/scan');
+                      },
+                    ),
+                  ),
+                  // Swapped: Notifications is now under Scan.
+                  Positioned(
+                    top: 96,
+                    right: 14,
+                    child: _CircleNavButton(
+                      icon: Icons.local_fire_department_rounded,
+                      label: 'Notifications',
+                      onTap: () {
+                        HapticFeedback.lightImpact();
+                        context.push('/dashboard/right');
+                      },
+                    ),
+                  ),
+                ],
+
               // Bottom pills panel
               Align(
                 alignment: Alignment.bottomCenter,
-                child: _TodayPillsPanel(
-                  pills: _todayPills,
-                  onPillTap: _showPillDetails,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _HappinessMeter(expression: _expression),
+                    const SizedBox(height: 10),
+                    _TodayPillsPanel(
+                      pills: _todayPills,
+                      onPillTap: _showPillDetails,
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -304,23 +485,27 @@ class _CircleNavButton extends StatelessWidget {
           onTap: onTap,
           customBorder: const CircleBorder(),
           child: Container(
-            width: 46,
-            height: 46,
+            width: 74,
+            height: 74,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               border: Border.all(
                 color: Colors.white.withValues(alpha: 0.95),
-                width: 1.5,
+                width: 2,
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.08),
-                  blurRadius: 14,
-                  offset: const Offset(0, 6),
+                  color: Colors.black.withValues(alpha: 0.10),
+                  blurRadius: 18,
+                  offset: const Offset(0, 8),
                 ),
               ],
             ),
-            child: Icon(icon, color: const Color(0xFF1E2D4A), size: 22),
+            child: Icon(
+              icon,
+              color: const Color(0xFF1E2D4A),
+              size: 34,
+            ),
           ),
         ),
       ),
@@ -328,106 +513,211 @@ class _CircleNavButton extends StatelessWidget {
   }
 }
 
-class _PetCard extends StatelessWidget {
-  const _PetCard({required this.accent, required this.statusText});
+class _PalNameBadge extends StatelessWidget {
+  const _PalNameBadge({required this.name, required this.onTap});
 
-  final Color accent;
-  final String statusText;
+  final String name;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: Container(
+          height: 44,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.72),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.92),
+              width: 1.4,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.06),
+                blurRadius: 16,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: const Color(0xFF7DB8F7).withValues(alpha: 0.9),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                child: Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                    color: Color(0xFF1E2D4A),
+                    height: 1.0,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FloatingPalSprite extends StatelessWidget {
+  const _FloatingPalSprite({
+    required this.accent,
+    required this.petAssetPath,
+  });
+
+  final Color accent;
+  final String petAssetPath;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 300,
+      height: 300,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Container(
+            width: 250,
+            height: 250,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: RadialGradient(
+                colors: [
+                  accent.withValues(alpha: 0.18),
+                  Colors.white.withValues(alpha: 0.0),
+                ],
+                stops: const [0.0, 1.0],
+              ),
+            ),
+          ),
+          Image.asset(
+            petAssetPath,
+            width: 280,
+            height: 280,
+            fit: BoxFit.contain,
+            filterQuality: FilterQuality.high,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HappinessMeter extends StatelessWidget {
+  const _HappinessMeter({required this.expression});
+
+  final PalExpression expression;
+
+  double get _value => switch (expression) {
+        PalExpression.depressed => 0.20,
+        PalExpression.sad => 0.45,
+        PalExpression.neutral => 0.70,
+        PalExpression.happy => 1.00,
+      };
+
+  String get _label => switch (expression) {
+        PalExpression.depressed => 'Not feeling great',
+        PalExpression.sad => 'A bit down',
+        PalExpression.neutral => 'Doing okay',
+        PalExpression.happy => 'Feeling great',
+      };
+
+  String get _emoji => switch (expression) {
+        PalExpression.depressed => '😢',
+        PalExpression.sad => '😕',
+        PalExpression.neutral => '🙂',
+        PalExpression.happy => '😁',
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = Theme.of(context).colorScheme.primary;
+
     return Container(
-      width: 280,
-      padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+      width: 320,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.75),
-        borderRadius: BorderRadius.circular(28),
+        color: Colors.white.withValues(alpha: 0.72),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: Colors.white.withValues(alpha: 0.9),
+          color: Colors.white.withValues(alpha: 0.92),
           width: 1.4,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.10),
-            blurRadius: 26,
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 18,
             offset: const Offset(0, 10),
-          ),
-          BoxShadow(
-            color: const Color(0xFF4A90D9).withValues(alpha: 0.08),
-            blurRadius: 32,
-            offset: const Offset(0, 12),
           ),
         ],
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+      child: Stack(
         children: [
-          Container(
-            width: 140,
-            height: 140,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  const Color(0xFF7DB8F7).withValues(alpha: 0.22),
-                  const Color(0xFFFFD166).withValues(alpha: 0.22),
-                ],
-              ),
+          Positioned(
+            top: -2,
+            right: 0,
+            child: Text(
+              _emoji,
+              style: const TextStyle(fontSize: 22),
             ),
-            child: Center(
-              child: Container(
-                width: 96,
-                height: 96,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      Color(0xFF7DB8F7),
-                      Color(0xFF4A90D9),
-                      Color(0xFFFFD166),
-                    ],
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.08),
-                      blurRadius: 20,
-                      offset: const Offset(0, 8),
-                    ),
-                  ],
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Happiness',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w900,
+                  color: Color(0xFF1E2D4A),
+                  letterSpacing: 0.2,
                 ),
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Image.asset(
-                    'assets/pals/cat/neutral.png',
-                    fit: BoxFit.contain,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.black.withValues(alpha: 0.62),
+                ),
+              ),
+              const SizedBox(height: 10),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(999),
+                child: LinearProgressIndicator(
+                  // Mirrors the same backend-driven expression used for the pal sprite.
+                  value: _value,
+                  minHeight: 12,
+                  backgroundColor: const Color(0xFFE8EFFE).withValues(alpha: 0.95),
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    Color.lerp(const Color(0xFFFFC947), accent, 0.55) ?? accent,
                   ),
                 ),
               ),
-            ),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            statusText,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
-              color: Color(0xFF1E2D4A),
-              height: 1.15,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Tap a pill below to see details.',
-            style: TextStyle(
-              fontSize: 13,
-              color: Colors.black.withValues(alpha: 0.55),
-              fontWeight: FontWeight.w600,
-            ),
+            ],
           ),
         ],
       ),
@@ -472,7 +762,7 @@ class _TodayPillsPanel extends StatelessWidget {
               const Text(
                 'Today’s pills',
                 style: TextStyle(
-                  fontSize: 16,
+                  fontSize: 18,
                   fontWeight: FontWeight.w900,
                   color: Color(0xFF1E2D4A),
                 ),
@@ -481,7 +771,7 @@ class _TodayPillsPanel extends StatelessWidget {
               Text(
                 '${pills.length} total',
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: 13,
                   color: Colors.black.withValues(alpha: 0.55),
                   fontWeight: FontWeight.w700,
                 ),
@@ -525,12 +815,12 @@ class _PillTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
           child: Row(
             children: [
               Container(
-                width: 44,
-                height: 44,
+                width: 52,
+                height: 52,
                 decoration: BoxDecoration(
                   color: pill.color.withValues(alpha: 0.14),
                   borderRadius: BorderRadius.circular(14),
@@ -547,7 +837,7 @@ class _PillTile extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontSize: 15,
+                        fontSize: 17,
                         fontWeight: FontWeight.w900,
                         color: Color(0xFF1E2D4A),
                       ),
@@ -558,7 +848,7 @@ class _PillTile extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: 13,
                         color: Colors.black.withValues(alpha: 0.58),
                         fontWeight: FontWeight.w700,
                       ),
@@ -570,7 +860,7 @@ class _PillTile extends StatelessWidget {
               Icon(
                 Icons.info_outline_rounded,
                 color: Colors.black.withValues(alpha: 0.45),
-                size: 18,
+                size: 20,
               ),
             ],
           ),
@@ -596,5 +886,128 @@ class _PillItem {
   final String instructions;
   final Color color;
   final IconData icon;
+
+  String get doseId => '$name::$timeLabel';
+}
+
+class _PetPickerDialog extends StatelessWidget {
+  const _PetPickerDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = TextEditingController(text: 'Pal');
+    return AlertDialog(
+      title: const Text(
+        'Choose your Pal',
+        style: TextStyle(fontWeight: FontWeight.w900),
+      ),
+      content: SizedBox(
+        width: 360,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Pick a little friend to join your pill routine.',
+              style: TextStyle(
+                color: Colors.black.withValues(alpha: 0.65),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: controller,
+              textInputAction: TextInputAction.done,
+              decoration: const InputDecoration(
+                labelText: 'Name your Pal',
+                hintText: 'e.g. Sunny',
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                for (final pal in availablePillPals) ...[
+                  Expanded(
+                    child: _PetChoiceTile(
+                      pal: pal,
+                      onTap: () {
+                        final name = controller.text.trim().isEmpty
+                            ? 'Pal'
+                            : controller.text.trim();
+                        Navigator.of(context).pop(_PalSelection(pal: pal, name: name));
+                      },
+                    ),
+                  ),
+                  if (pal != availablePillPals.last) const SizedBox(width: 10),
+                ],
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PetChoiceTile extends StatelessWidget {
+  const _PetChoiceTile({required this.pal, required this.onTap});
+
+  final PillPal pal;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white.withValues(alpha: 0.9),
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: const Color(0xFFE8EFFE).withValues(alpha: 0.9),
+                ),
+                padding: const EdgeInsets.all(10),
+                child: Image.asset(
+                  pal.assetFor(PalExpression.neutral),
+                  fit: BoxFit.contain,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                pal.name,
+                maxLines: 3,
+                softWrap: true,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 12,
+                  color: Color(0xFF1E2D4A),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PalSelection {
+  const _PalSelection({required this.pal, required this.name});
+  final PillPal pal;
+  final String name;
 }
 
