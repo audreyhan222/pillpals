@@ -22,5 +22,6 @@ Future<void> main() async {
   } catch (e) {
     debugPrint('Firebase initialization failed: $e');
   }
+
   runApp(const PillPalsApp());
 }
