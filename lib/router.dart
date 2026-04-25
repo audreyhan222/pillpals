@@ -8,6 +8,7 @@ import 'screens/dashboard/dashboard_left_screen.dart';
 import 'screens/dashboard/dashboard_right_screen.dart';
 import 'screens/dashboard/dashboard_screen.dart';
 import 'screens/role/landing_page.dart';
+import 'screens/role/role_select_screen.dart';
 import 'screens/reminder/reminder_screen.dart';
 import 'screens/shell/home_shell.dart';
 import 'state/session_store.dart';
@@ -22,9 +23,11 @@ final appRouter = GoRouter(
       if (!session.bootstrapped) return null;
 
       final isLoggingIn = state.matchedLocation == '/login' || state.matchedLocation == '/signup';
+      final isRolePick = state.matchedLocation == '/role';
       // For now, dashboard is public (no credentials required yet).
       final isPublic = state.matchedLocation == '/' ||
           isLoggingIn ||
+          isRolePick ||
           state.matchedLocation == '/reminder' ||
           state.matchedLocation == '/dashboard' ||
           state.matchedLocation == '/dashboard/left' ||
@@ -35,7 +38,7 @@ final appRouter = GoRouter(
       }
 
       if (session.isAuthed && isLoggingIn) {
-        return '/dashboard';
+        return session.hasRole ? '/dashboard' : '/role';
       }
       return null;
     },
@@ -51,6 +54,10 @@ final appRouter = GoRouter(
       GoRoute(
         path: '/signup',
         builder: (context, state) => const SignupScreen(),
+      ),
+      GoRoute(
+        path: '/role',
+        builder: (context, state) => const RoleSelectScreen(),
       ),
       GoRoute(
         path: '/dashboard',

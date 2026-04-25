@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
+
+import '../../state/session_store.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -45,7 +48,13 @@ class _LoginScreenState extends State<LoginScreen>
   Future<void> _submit() async {
     // MVP: no credentials required yet — jump straight to the dashboard.
     HapticFeedback.lightImpact();
-    context.go('/dashboard');
+    final role = GoRouterState.of(context).uri.queryParameters['role'];
+    final session = context.read<SessionStore>();
+    if (role != null && role.isNotEmpty) {
+      await session.setRole(role);
+    }
+    if (!mounted) return;
+    context.go(session.hasRole ? '/dashboard' : '/role');
   }
 
   @override
