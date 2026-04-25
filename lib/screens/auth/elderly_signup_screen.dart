@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -6,20 +5,19 @@ import 'package:provider/provider.dart';
 
 import '../../state/session_store.dart';
 
-class CaregiverLoginScreen extends StatefulWidget {
-  const CaregiverLoginScreen({super.key});
+class ElderlySignupScreen extends StatefulWidget {
+  const ElderlySignupScreen({super.key});
 
   @override
-  State<CaregiverLoginScreen> createState() => _CaregiverLoginScreenState();
+  State<ElderlySignupScreen> createState() => _ElderlySignupScreenState();
 }
 
-class _CaregiverLoginScreenState extends State<CaregiverLoginScreen>
+class _ElderlySignupScreenState extends State<ElderlySignupScreen>
     with SingleTickerProviderStateMixin {
+  final _name = TextEditingController();
   final _email = TextEditingController();
   final _password = TextEditingController();
   bool _obscurePassword = true;
-  bool _loading = false;
-  String? _error;
 
   late final AnimationController _controller;
   late final Animation<double> _opacity;
@@ -42,6 +40,7 @@ class _CaregiverLoginScreenState extends State<CaregiverLoginScreen>
 
   @override
   void dispose() {
+    _name.dispose();
     _email.dispose();
     _password.dispose();
     _controller.dispose();
@@ -49,42 +48,12 @@ class _CaregiverLoginScreenState extends State<CaregiverLoginScreen>
   }
 
   Future<void> _submit() async {
-    if (_email.text.trim().isEmpty || _password.text.isEmpty) {
-      setState(() => _error = 'Please enter your username and password.');
-      return;
-    }
-
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-
+    // MVP: no real account creation yet — just continue into the elderly flow.
     HapticFeedback.lightImpact();
-
-    try {
-      // Query Firestore: users → caretaker document where username matches
-      final query = await FirebaseFirestore.instance
-          .collection('users')
-          .where('username', isEqualTo: _email.text.trim())
-          .where('password', isEqualTo: _password.text)
-          .limit(1)
-          .get();
-
-      if (query.docs.isEmpty) {
-        setState(() => _error = 'Invalid username or password. Please try again.');
-        return;
-      }
-
-      // Credentials matched — proceed
-      final session = context.read<SessionStore>();
-      await session.setRole('caregiver');
-      if (!mounted) return;
-      context.go('/caregiver');
-    } catch (e) {
-      setState(() => _error = 'Something went wrong. Please try again.');
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
+    final session = context.read<SessionStore>();
+    await session.setRole('elderly');
+    if (!mounted) return;
+    context.go('/dashboard');
   }
 
   @override
@@ -127,7 +96,7 @@ class _CaregiverLoginScreenState extends State<CaregiverLoginScreen>
                       GestureDetector(
                         onTap: () {
                           HapticFeedback.lightImpact();
-                          context.go('/');
+                          context.pop();
                         },
                         child: Container(
                           width: 42,
@@ -167,28 +136,28 @@ class _CaregiverLoginScreenState extends State<CaregiverLoginScreen>
                                   begin: Alignment.topLeft,
                                   end: Alignment.bottomRight,
                                   colors: [
-                                    Color(0xFF7DB8F7),
-                                    Color(0xFF4A90D9),
                                     Color(0xFFFFD166),
+                                    Color(0xFFE5A800),
+                                    Color(0xFF7DB8F7),
                                   ],
                                 ),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: const Color(0xFF4A90D9).withValues(alpha: 0.35),
+                                    color: const Color(0xFFE5A800).withValues(alpha: 0.32),
                                     blurRadius: 20,
                                     offset: const Offset(0, 8),
                                   ),
                                 ],
                               ),
                               child: const Icon(
-                                Icons.people_rounded,
+                                Icons.person_add_alt_1_rounded,
                                 color: Colors.white,
                                 size: 40,
                               ),
                             ),
                             const SizedBox(height: 16),
                             const Text(
-                              'Caregiver sign in',
+                              'Create your account',
                               style: TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.w800,
@@ -197,12 +166,13 @@ class _CaregiverLoginScreenState extends State<CaregiverLoginScreen>
                             ),
                             const SizedBox(height: 6),
                             const Text(
-                              'Continue to your caregiver tools.',
+                              'This helps your caregiver support you.\n(We can keep it simple for now.)',
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                 fontSize: 13,
                                 color: Color(0xFF8A94A6),
                                 fontWeight: FontWeight.w500,
+                                height: 1.25,
                               ),
                             ),
                           ],
@@ -230,10 +200,20 @@ class _CaregiverLoginScreenState extends State<CaregiverLoginScreen>
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             _StyledTextField(
-                              controller: _email,
-                              label: 'Username',
-                              icon: Icons.person_outline_rounded,
+                              controller: _name,
+                              label: 'Your name',
+                              icon: Icons.badge_outlined,
                               accentColor: const Color(0xFF4A90D9),
+                              keyboardType: TextInputType.name,
+                              textInputAction: TextInputAction.next,
+                            ),
+                            const SizedBox(height: 14),
+                            _StyledTextField(
+                              controller: _email,
+                              label: 'Email address',
+                              icon: Icons.email_outlined,
+                              accentColor: const Color(0xFF4A90D9),
+                              keyboardType: TextInputType.emailAddress,
                               textInputAction: TextInputAction.next,
                             ),
                             const SizedBox(height: 14),
@@ -258,59 +238,20 @@ class _CaregiverLoginScreenState extends State<CaregiverLoginScreen>
                                 ),
                               ),
                             ),
-
-                            // ── Error message ──────────────────────
-                            if (_error != null) ...[
-                              const SizedBox(height: 14),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 14,
-                                  vertical: 10,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFFFEDED),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: const Color(0xFFFFB3B3),
-                                  ),
-                                ),
-                                child: Row(
-                                  children: [
-                                    const Icon(
-                                      Icons.error_outline_rounded,
-                                      color: Color(0xFFD94A4A),
-                                      size: 18,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(
-                                        _error!,
-                                        style: const TextStyle(
-                                          color: Color(0xFFD94A4A),
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-
                             const SizedBox(height: 20),
                             _GradientButton(
-                              label: 'Sign in',
-                              enabled: !_loading,
+                              label: 'Create account',
+                              enabled: true,
                               gradient: const LinearGradient(
                                 begin: Alignment.topLeft,
                                 end: Alignment.bottomRight,
                                 colors: [
-                                  Color(0xFF7DB8F7),
-                                  Color(0xFF4A90D9),
+                                  Color(0xFFFFD166),
+                                  Color(0xFFE5A800),
                                 ],
                               ),
-                              shadowColor: const Color(0xFF4A90D9).withValues(alpha: 0.35),
-                              onTap: _loading ? null : _submit,
+                              shadowColor: const Color(0xFFE5A800).withValues(alpha: 0.30),
+                              onTap: _submit,
                             ),
                           ],
                         ),
@@ -318,14 +259,8 @@ class _CaregiverLoginScreenState extends State<CaregiverLoginScreen>
                       const SizedBox(height: 20),
                       Center(
                         child: TextButton(
-                          onPressed: _loading ? null : () => context.go('/login/elderly'),
-                          child: const Text('I am an elderly user'),
-                        ),
-                      ),
-                      Center(
-                        child: TextButton(
-                          onPressed: () => context.push('/signup/caregiver'),
-                          child: const Text('Create an account'),
+                          onPressed: () => context.pop(),
+                          child: const Text('I already have an account'),
                         ),
                       ),
                     ],
@@ -492,24 +427,15 @@ class _GradientButtonState extends State<_GradientButton>
               ],
             ),
             child: Center(
-              child: widget.enabled
-                  ? Text(
-                      widget.label,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.3,
-                      ),
-                    )
-                  : const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.5,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                      ),
-                    ),
+              child: Text(
+                widget.label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.3,
+                ),
+              ),
             ),
           ),
         ),
@@ -517,3 +443,4 @@ class _GradientButtonState extends State<_GradientButton>
     );
   }
 }
+
