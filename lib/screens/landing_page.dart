@@ -72,8 +72,8 @@ class _LandingPageState extends State<LandingPage>
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              AppColors.pastelBlue.withValues(alpha: 0.3),
-              AppColors.pastelYellow.withValues(alpha: 0.3),
+              AppColors.pastelBlue.withOpacity(0.3),
+              AppColors.pastelYellow.withOpacity(0.3),
             ],
           ),
         ),
@@ -106,7 +106,7 @@ class _LandingPageState extends State<LandingPage>
                             ),
                             boxShadow: [
                               BoxShadow(
-                                color: AppColors.deepYellow.withValues(alpha: 0.3),
+                                color: AppColors.deepYellow.withOpacity(0.3),
                                 blurRadius: 20,
                                 offset: const Offset(0, 10),
                               ),
@@ -226,12 +226,12 @@ class _LandingPageState extends State<LandingPage>
             color: bgColor,
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
-              color: accentColor.withValues(alpha: 0.3),
+              color: accentColor.withOpacity(0.3),
               width: 2,
             ),
             boxShadow: [
               BoxShadow(
-                color: accentColor.withValues(alpha: 0.15),
+                color: accentColor.withOpacity(0.15),
                 blurRadius: 15,
                 offset: const Offset(0, 8),
               ),
@@ -244,7 +244,7 @@ class _LandingPageState extends State<LandingPage>
                 height: 60,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: accentColor.withValues(alpha: 0.15),
+                  color: accentColor.withOpacity(0.15),
                 ),
                 child: Center(
                   child: Text(
@@ -282,7 +282,7 @@ class _LandingPageState extends State<LandingPage>
                 height: 40,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: accentColor.withValues(alpha: 0.2),
+                color: accentColor.withOpacity(0.2),
                 ),
                 child: Icon(
                   Icons.arrow_forward_rounded,
