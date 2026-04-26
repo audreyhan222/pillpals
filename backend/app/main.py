@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import logging
 import random
+import re
 import string
 from datetime import datetime, timedelta, timezone
 from typing import List
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select
@@ -701,17 +703,211 @@ def caregiver_alert(
 
 
 @app.post("/scan-medication", response_model=ScanMedicationOut)
-def scan_medication(
-    payload: ScanMedicationIn,
-):
-    # MVP "mock OCR": naive keyword extraction
+async def scan_medication(payload: ScanMedicationIn):
+    """
+    LLM-backed extraction from OCR text → {name,dosage,instructions}.
+    Falls back to a tiny heuristic if OPENAI_API_KEY isn't configured.
+    """
     text = payload.text.strip()
-    name = "Medication"
-    dosage = "1 pill"
-    instructions = "Take as directed."
-    if "mg" in text.lower():
-        dosage = "See label (mg detected)"
-    if len(text) > 0:
-        name = text.splitlines()[0][:40]
-    return ScanMedicationOut(name=name, dosage=dosage, instructions=instructions)
+    if not text:
+        return ScanMedicationOut(name="", dosage="", instructions="")
+
+    if not (settings.openai_api_key or "").strip():
+        # Fallback: keep previous mock-ish behavior (better than throwing).
+        name = text.splitlines()[0][:40] if text else "Medication"
+        dosage = "See label" if "mg" in text.lower() else "1 pill"
+        instructions = "Take as directed."
+        return ScanMedicationOut(name=name, dosage=dosage, instructions=instructions)
+
+    # Lightweight hints help the model avoid picking the wrong line from noisy OCR.
+    hints = _ocr_hints(text)
+    hints_block = "\n".join(f"- {k}: {v}" for k, v in hints.items() if v)
+    if not hints_block:
+        hints_block = "- (none)"
+
+    system = (
+        "You extract structured medication info from messy OCR of prescription labels.\n"
+        "Rules:\n"
+        "- Output must match the provided JSON schema (no extra keys).\n"
+        "- Use empty string when unknown.\n"
+        "- name: medication name only (exclude patient/pharmacy/address/doctor/Rx#).\n"
+        "- dosage: include strength + form if present (e.g. '500 mg tablet', '10 mL', '2 puffs').\n"
+        "- instructions: the SIG / directions for use (e.g. 'Take 1 tablet by mouth twice daily with food').\n"
+        "- If multiple candidates exist, choose the most medication-like.\n"
+        "- Never invent details not supported by the OCR."
+    )
+
+    user = (
+        "OCR text (noisy):\n"
+        f"{text}\n\n"
+        "Heuristic hints (may be wrong):\n"
+        f"{hints_block}\n"
+    )
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"},
+            "dosage": {"type": "string"},
+            "instructions": {"type": "string"},
+        },
+        "required": ["name", "dosage", "instructions"],
+        "additionalProperties": False,
+    }
+
+    payload_json = {
+        "model": settings.openai_model,
+        "input": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "temperature": 0.0,
+        # Responses API structured outputs.
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "scan_medication",
+                "strict": True,
+                "schema": schema,
+            }
+        },
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=40.0) as client:
+            r = await client.post(
+                "https://api.openai.com/v1/responses",
+                headers={
+                    "Authorization": f"Bearer {settings.openai_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload_json,
+            )
+        r.raise_for_status()
+        data = r.json()
+        content = _openai_response_text(data)
+        parsed = _try_parse_json_object(content) or {}
+        return ScanMedicationOut(
+            name=str(parsed.get("name") or "").strip(),
+            dosage=str(parsed.get("dosage") or "").strip(),
+            instructions=str(parsed.get("instructions") or "").strip(),
+        )
+    except Exception:
+        log.exception("scan_medication: OpenAI call failed; falling back")
+        name = text.splitlines()[0][:40] if text else "Medication"
+        dosage = "See label" if "mg" in text.lower() else "1 pill"
+        instructions = "Take as directed."
+        return ScanMedicationOut(name=name, dosage=dosage, instructions=instructions)
+
+
+def _ocr_hints(text: str) -> dict:
+    """
+    Best-effort guesses to guide the LLM on noisy OCR.
+    Keep this conservative: return empty strings when unsure.
+    """
+    t = (text or "").strip()
+    if not t:
+        return {"name_guess": "", "dosage_guess": "", "instructions_guess": ""}
+
+    lines = [ln.strip() for ln in re.split(r"\r?\n", t) if ln.strip()]
+    lower_lines = [ln.lower() for ln in lines]
+
+    # Dosage strength/form guess.
+    strength = ""
+    m = re.search(r"\b\d+(?:\.\d+)?\s*(mg|mcg|g|ml|units?)\b", t, flags=re.I)
+    if m:
+        strength = m.group(0).strip()
+
+    form = ""
+    for candidate in ("tablet", "tab", "capsule", "cap", "solution", "suspension", "cream", "ointment", "spray", "inhaler", "patch", "drops"):
+        if re.search(rf"\b{re.escape(candidate)}s?\b", t, flags=re.I):
+            form = candidate
+            break
+
+    dosage_guess = " ".join(x for x in [strength, form] if x).strip()
+
+    # Instructions guess: pick the first line that looks like a SIG.
+    instructions_guess = ""
+    sig_markers = ("take", "by mouth", "mouth", "daily", "twice", "once", "every", "at bedtime", "with food", "before meals", "after meals", "as needed", "prn", "apply", "inhale", "instill")
+    for ln, lln in zip(lines, lower_lines):
+        if any(mk in lln for mk in sig_markers) and len(ln) >= 8:
+            instructions_guess = ln
+            break
+
+    # Name guess: prefer first short-ish non-junk line that isn't obviously demographic/pharmacy.
+    name_guess = ""
+    junk_markers = ("patient", "address", "rx", "refill", "pharmacy", "doctor", "dr.", "qty", "date", "phone", "take", "sig", "directions")
+    for ln, lln in zip(lines, lower_lines):
+        if any(j in lln for j in junk_markers):
+            continue
+        if re.search(r"\b\d{2,}\b", ln):  # avoid lines dominated by ids
+            continue
+        if 2 <= len(ln) <= 50:
+            name_guess = ln
+            break
+
+    return {
+        "name_guess": name_guess,
+        "dosage_guess": dosage_guess,
+        "instructions_guess": instructions_guess,
+    }
+
+
+def _openai_response_text(resp: dict) -> str:
+    """
+    Best-effort extraction of text from the Responses API JSON.
+    """
+    # Preferred: output_text convenience field (present in many SDK/HTTP responses).
+    t = resp.get("output_text")
+    if isinstance(t, str) and t.strip():
+        return t.strip()
+
+    # Otherwise: stitch together output[].content[].text.
+    out = resp.get("output")
+    if isinstance(out, list):
+        parts: list[str] = []
+        for item in out:
+            if not isinstance(item, dict):
+                continue
+            content = item.get("content")
+            if not isinstance(content, list):
+                continue
+            for c in content:
+                if not isinstance(c, dict):
+                    continue
+                if c.get("type") == "output_text" and isinstance(c.get("text"), str):
+                    parts.append(c["text"])
+        joined = "\n".join(p.strip() for p in parts if p.strip())
+        if joined.strip():
+            return joined.strip()
+
+    # Last resort: serialize and hope the client-side wrapper finds JSON somewhere.
+    try:
+        return json.dumps(resp)
+    except Exception:
+        return str(resp)
+
+
+def _try_parse_json_object(s: str) -> dict | None:
+    s = (s or "").strip()
+    if not s:
+        return None
+    try:
+        d = json.loads(s)
+        if isinstance(d, dict):
+            return d
+    except Exception:
+        pass
+    start = s.find("{")
+    end = s.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    candidate = s[start : end + 1]
+    try:
+        d = json.loads(candidate)
+        if isinstance(d, dict):
+            return d
+    except Exception:
+        return None
+    return None
 

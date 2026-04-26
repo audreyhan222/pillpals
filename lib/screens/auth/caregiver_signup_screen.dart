@@ -1,13 +1,10 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
-import '../../api/api_client.dart';
-import '../../api/endpoints.dart';
-import '../../state/api_config_store.dart';
 import '../../state/session_store.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class CaregiverSignupScreen extends StatefulWidget {
   const CaregiverSignupScreen({super.key});
@@ -81,63 +78,25 @@ class _CaregiverSignupScreenState extends State<CaregiverSignupScreen>
         return; // finally still runs, so _loading will be reset ✓
       }
 
-     /* await FirebaseFirestore.instance
-          .collection('caretaker')
-          .doc(username)
-          .set({
-        'name': _name.text.trim(),     // ← add this so it's stored too
-        'password': _password.text,
-        'patients': [],
-        'createdAt': FieldValue.serverTimestamp(), // ← helps confirm writes in console
-      });
-      */
-
       await FirebaseFirestore.instance
           .collection('caretaker')
           .doc(username)
           .set({
-        'name': "chud",     // ← add this so it's stored too
-        'password': "tick",
+        'name': _name.text.trim(),
+        'username': username,
+        'password': _password.text,
         'patients': [],
-        'createdAt': FieldValue.serverTimestamp(), // ← helps confirm writes in console
+        'createdAt': FieldValue.serverTimestamp(),
       });
 
+      if (!mounted) return;
       final session = context.read<SessionStore>();
+      await session.setUsername(username);
       await session.setRole('caregiver');
       if (!mounted) return;
       context.go('/caregiver');
     } catch (e) {
       setState(() => _error = 'Something went wrong: $e'); // ← show actual error
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-
-    try {
-      final baseUrl = context.read<ApiConfigStore>().baseUrl;
-      final api = ApiClient(baseUrl: baseUrl);
-      final res = await api.dio.post(ApiEndpoints.signup, data: {
-        'email': _username.text.trim(),
-        'password': _password.text,
-      });
-      final data = res.data as Map<String, dynamic>;
-      final token = data['access_token'] as String?;
-      if (token == null || token.isEmpty) throw Exception('Missing token');
-
-      if (!mounted) return;
-      final session = context.read<SessionStore>();
-      await session.setToken(token);
-      await session.setRole('caregiver');
-      if (!mounted) return;
-      context.go('/caregiver');
-    } catch (e) {
-      setState(
-        () => _error =
-            'Sign up failed. Try a different email/password and verify the backend URL (Dev page).',
-      );
     } finally {
       if (mounted) setState(() => _loading = false);
     }

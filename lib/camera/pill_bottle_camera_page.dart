@@ -4,7 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 
+import '../firestore/elderly_medication_catalog_repository.dart';
+import '../state/session_store.dart';
 import '../theme/app_colors.dart';
 import 'pill_bottle_text_recognizer.dart';
 import 'pill_details_parser.dart';
@@ -140,6 +143,117 @@ class _PillBottleCameraPageState extends State<PillBottleCameraPage> {
     });
   }
 
+  Future<void> _promptManualMedicationAdd() async {
+    final session = context.read<SessionStore>();
+    final role = session.role;
+    final username = session.username?.trim();
+
+    if (role != 'elderly' || username == null || username.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Manual medication add is available for elderly accounts only.'),
+        ),
+      );
+      return;
+    }
+
+    final name = TextEditingController(text: _nameController.text.trim());
+    final totalLeft = TextEditingController();
+    final dosageAmount = TextEditingController(text: _dosageController.text.trim());
+    final dosageSchedule = TextEditingController(
+      text: _times.isEmpty ? '' : 'Daily at ${_times.map((t) => t.format(context)).join(', ')}',
+    );
+
+    try {
+      final saved = await showDialog<bool>(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: const Text('Add medication manually'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: name,
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(
+                      labelText: 'Medication name',
+                      hintText: 'e.g. Metformin',
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: totalLeft,
+                    textInputAction: TextInputAction.next,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Total medicine left',
+                      hintText: 'e.g. 30',
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: dosageAmount,
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(
+                      labelText: 'Dosage amount',
+                      hintText: 'e.g. 500mg / 1 tablet',
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: dosageSchedule,
+                    textInputAction: TextInputAction.done,
+                    minLines: 2,
+                    maxLines: 3,
+                    decoration: const InputDecoration(
+                      labelText: 'Dosage schedule',
+                      hintText: 'e.g. Daily at 9am and 9pm',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('Save'),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (saved != true || !mounted) return;
+
+      final trimmedName = name.text.trim();
+      final left = int.tryParse(totalLeft.text.trim()) ?? 0;
+      await ElderlyMedicationCatalogRepository().upsertMedication(
+        elderlyUsername: username,
+        name: trimmedName,
+        totalLeft: left,
+        dosageAmount: dosageAmount.text.trim(),
+        dosageSchedule: dosageSchedule.text.trim(),
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Saved: ${trimmedName.isEmpty ? 'Medication' : trimmedName}')),
+      );
+    } finally {
+      name.dispose();
+      totalLeft.dispose();
+      dosageAmount.dispose();
+      dosageSchedule.dispose();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -243,6 +357,22 @@ class _PillBottleCameraPageState extends State<PillBottleCameraPage> {
                             icon: const Icon(Icons.camera_alt_rounded, size: 26),
                             label: Text(
                               _isProcessing ? 'Processing…' : 'Take photo',
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          FilledButton.tonalIcon(
+                            onPressed: _isProcessing ? null : _promptManualMedicationAdd,
+                            icon: const Icon(Icons.edit_note_rounded),
+                            label: const Text('Manual add medication'),
+                            style: FilledButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                              textStyle: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                              ),
                             ),
                           ),
                           const SizedBox(height: 10),

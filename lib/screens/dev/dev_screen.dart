@@ -6,7 +6,6 @@ import 'package:provider/provider.dart';
 import '../../config/app_config.dart';
 import '../../state/pill_completion_store.dart';
 import '../../state/api_config_store.dart';
-import '../../state/session_store.dart';
 import '../../notifications/notification_service.dart';
 
 class DevScreen extends StatefulWidget {
@@ -29,7 +28,6 @@ class _DevScreenState extends State<DevScreen> {
   @override
   Widget build(BuildContext context) {
     final store = context.watch<PillCompletionStore>();
-    final session = context.watch<SessionStore>();
     final apiConfig = context.watch<ApiConfigStore>();
     final taken = store.takenDoseIdsForDay(_selected).toList()..sort();
     final key = PillCompletionStore.dayKey(_selected);
@@ -64,7 +62,7 @@ class _DevScreenState extends State<DevScreen> {
               children: [
                 _GlassIconButton(
                   icon: Icons.arrow_back_ios_new_rounded,
-                  onTap: () => context.pop(),
+                  onTap: () => context.go('/'),
                 ),
                 const SizedBox(height: 18),
                 const Text(
@@ -310,19 +308,20 @@ class _DevScreenState extends State<DevScreen> {
                           const SizedBox(height: 10),
                           FilledButton.icon(
                             onPressed: () async {
-                              await NotificationService.instance.triggerDevPush(
-                                message: 'Triggered from Dev screen.',
-                                authToken: session.token,
+                              await NotificationService.instance
+                                  .requestPermissions();
+                              await NotificationService.instance.showTestNow(
+                                payload: 'dev_test_now',
                               );
                             },
                             icon: const Icon(
                               Icons.notifications_active_rounded,
                             ),
-                            label: const Text('Trigger push notification'),
+                            label: const Text('Send test notification (local)'),
                           ),
                           const SizedBox(height: 10),
                           const _SectionHint(
-                            'Calls your backend to send a real push; falls back to a local notification if the backend is not set up yet.',
+                            'Sends an immediate local notification to verify permissions + display. (No backend needed.)',
                           ),
                         ],
                       ),

@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:provider/provider.dart';
+
+import '../../state/session_store.dart';
 
 class CaregiverElderlySelectionScreen extends StatefulWidget {
   const CaregiverElderlySelectionScreen({super.key});
@@ -12,29 +16,70 @@ class CaregiverElderlySelectionScreen extends StatefulWidget {
 
 class _CaregiverElderlySelectionScreenState
     extends State<CaregiverElderlySelectionScreen> {
-  final List<_LinkedElderly> _linked = <_LinkedElderly>[
-    const _LinkedElderly(
-      id: 'e-1001',
-      name: 'Maria G.',
-      subtitle: '3 meds • last confirmed 2h ago',
-      color: Color(0xFF4A90D9),
-      icon: Icons.favorite_rounded,
-    ),
-    const _LinkedElderly(
-      id: 'e-1002',
-      name: 'James P.',
-      subtitle: '5 meds • 1 dose pending',
-      color: Color(0xFFE5A800),
-      icon: Icons.alarm_rounded,
-    ),
-    const _LinkedElderly(
-      id: 'e-1003',
-      name: 'Evelyn S.',
-      subtitle: '2 meds • streak 6 days',
-      color: Color(0xFF7DB8F7),
-      icon: Icons.insights_rounded,
-    ),
-  ];
+  final List<_LinkedElderly> _linked = <_LinkedElderly>[];
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLinked();
+  }
+
+  Future<void> _loadLinked() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final caregiverUsername =
+          context.read<SessionStore>().username?.trim() ?? '';
+      if (caregiverUsername.isEmpty) {
+        throw Exception('Missing caregiver username in session.');
+      }
+
+      final caregiverDoc = await FirebaseFirestore.instance
+          .collection('caretaker')
+          .doc(caregiverUsername)
+          .get();
+      final data = caregiverDoc.data();
+      final patients = (data?['patients'] as List?)?.cast<dynamic>() ?? const [];
+
+      final items = <_LinkedElderly>[];
+      for (final p in patients) {
+        final m = (p is Map) ? p : null;
+        final code = (m?['connectCode'] as String?)?.trim() ?? '';
+        final elderlyUsername = (m?['elderlyUsername'] as String?)?.trim() ?? '';
+        final name = (m?['elderlyName'] as String?)?.trim() ?? 'Linked user';
+        if (code.isEmpty) continue;
+        final subtitle = elderlyUsername.isNotEmpty
+            ? 'Code $code • $elderlyUsername'
+            : 'Code $code';
+        items.add(
+          _LinkedElderly(
+            id: code,
+            name: name,
+            subtitle: subtitle,
+            elderlyUsername: elderlyUsername,
+            color: const Color(0xFF4A90D9),
+            icon: Icons.link_rounded,
+          ),
+        );
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _linked
+          ..clear()
+          ..addAll(items);
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
 
   Future<void> _promptAddPerson() async {
     final controller = TextEditingController();
@@ -49,8 +94,8 @@ class _CaregiverElderlySelectionScreenState
               autofocus: true,
               textInputAction: TextInputAction.done,
               decoration: const InputDecoration(
-                labelText: 'Unique ID',
-                hintText: 'e.g. e-1042',
+                labelText: 'Connect code',
+                hintText: 'e.g. ABCD2345',
               ),
               onSubmitted: (_) => Navigator.of(context).pop(controller.text),
             ),
@@ -72,22 +117,76 @@ class _CaregiverElderlySelectionScreenState
       if (!mounted) return;
       if (id.isEmpty) return;
 
-      final exists = _linked.any(
-        (p) => p.id.toLowerCase() == id.toLowerCase(),
-      );
+      final code = id.toUpperCase();
+      final exists = _linked.any((p) => p.id.toUpperCase() == code);
       if (exists) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('That ID is already linked: $id')),
+          SnackBar(content: Text('That code is already linked: $code')),
         );
         return;
       }
 
+      final caregiverUsername =
+          context.read<SessionStore>().username?.trim() ?? '';
+      if (caregiverUsername.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Missing caregiver username in session.')),
+        );
+        return;
+      }
+
+      // Resolve connect code -> elderly username
+      final codeDoc = await FirebaseFirestore.instance
+          .collection('connectCodes')
+          .doc(code)
+          .get();
+      if (!codeDoc.exists) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No elderly account found for code: $code')),
+        );
+        return;
+      }
+      final elderlyUsername =
+          (codeDoc.data()?['elderlyUsername'] as String?)?.trim() ?? '';
+
+      String elderlyName = 'Linked user';
+      if (elderlyUsername.isNotEmpty) {
+        final elderlyDoc = await FirebaseFirestore.instance
+            .collection('elderly')
+            .doc(elderlyUsername)
+            .get();
+        elderlyName = (elderlyDoc.data()?['name'] as String?)?.trim() ?? elderlyName;
+      }
+
+      await FirebaseFirestore.instance
+          .collection('caretaker')
+          .doc(caregiverUsername)
+          .set(
+        <String, dynamic>{
+          'patients': FieldValue.arrayUnion([
+            <String, dynamic>{
+              'connectCode': code,
+              'elderlyUsername': elderlyUsername,
+              'elderlyName': elderlyName,
+              'linkedAt': FieldValue.serverTimestamp(),
+            }
+          ]),
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+
+      if (!mounted) return;
       setState(() {
         _linked.add(
           _LinkedElderly(
-            id: id,
-            name: 'Linked user',
-            subtitle: 'Linked by ID • stats loading soon',
+            id: code,
+            name: elderlyName,
+            subtitle: elderlyUsername.isNotEmpty
+                ? 'Code $code • $elderlyUsername'
+                : 'Code $code',
+            elderlyUsername: elderlyUsername,
             color: const Color(0xFF4A90D9),
             icon: Icons.link_rounded,
           ),
@@ -197,20 +296,45 @@ class _CaregiverElderlySelectionScreenState
                 ),
                 const SizedBox(height: 14),
                 Expanded(
-                  child: ListView.separated(
-                    itemCount: _linked.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 10),
-                    itemBuilder: (context, index) {
-                      final p = _linked[index];
-                      return _PersonCard(
-                        person: p,
-                        onTap: () {
-                          HapticFeedback.lightImpact();
-                          context.push('/caregiver/elderly/${p.id}');
-                        },
-                      );
-                    },
-                  ),
+                  child: _loading
+                      ? const Center(child: CircularProgressIndicator())
+                      : _error != null
+                          ? Center(
+                              child: Text(
+                                _error!,
+                                textAlign: TextAlign.center,
+                              ),
+                            )
+                          : _linked.isEmpty
+                              ? Center(
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 18),
+                                    child: Text(
+                                      'No linked patients yet.\nTap the + button to add someone using their connect code.',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        color: Colors.black.withValues(alpha: 0.65),
+                                        height: 1.25,
+                                      ),
+                                    ),
+                                  ),
+                                )
+                          : ListView.separated(
+                              itemCount: _linked.length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(height: 10),
+                              itemBuilder: (context, index) {
+                                final p = _linked[index];
+                                return _PersonCard(
+                                  person: p,
+                                  onTap: () {
+                                    HapticFeedback.lightImpact();
+                                    context.push('/caregiver/elderly/${p.id}');
+                                  },
+                                );
+                              },
+                            ),
                 ),
               ],
             ),
@@ -293,6 +417,10 @@ class _PersonCard extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
+                    if (person.elderlyUsername.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      _PatientDayStatusLine(elderlyUsername: person.elderlyUsername),
+                    ],
                   ],
                 ),
               ),
@@ -355,6 +483,7 @@ class _LinkedElderly {
     required this.id,
     required this.name,
     required this.subtitle,
+    required this.elderlyUsername,
     required this.color,
     required this.icon,
   });
@@ -362,7 +491,85 @@ class _LinkedElderly {
   final String id;
   final String name;
   final String subtitle;
+  final String elderlyUsername;
   final Color color;
   final IconData icon;
+}
+
+class _PatientDayStatusLine extends StatelessWidget {
+  const _PatientDayStatusLine({required this.elderlyUsername});
+
+  final String elderlyUsername;
+
+  static String _dayKey(DateTime date) {
+    final d = DateTime(date.year, date.month, date.day);
+    final mm = d.month.toString().padLeft(2, '0');
+    final dd = d.day.toString().padLeft(2, '0');
+    return '${d.year}-$mm-$dd';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final username = elderlyUsername.trim();
+    if (username.isEmpty) return const SizedBox.shrink();
+
+    final db = FirebaseFirestore.instance;
+    final todayKey = _dayKey(DateTime.now());
+    final catalogStream = db
+        .collection('elderly')
+        .doc(username)
+        .collection('medicationCatalog')
+        .snapshots();
+    final statusStream = db
+        .collection('elderly')
+        .doc(username)
+        .collection('dailyStatus')
+        .doc(todayKey)
+        .snapshots();
+
+    TextStyle style() => TextStyle(
+          fontSize: 12,
+          color: Colors.black.withValues(alpha: 0.62),
+          fontWeight: FontWeight.w800,
+        );
+
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: catalogStream,
+      builder: (context, catSnap) {
+        int totalLeft = 0;
+        if (catSnap.hasData) {
+          for (final doc in catSnap.data!.docs) {
+            final v = doc.data()['totalLeft'];
+            if (v is int) totalLeft += v;
+            if (v is num) totalLeft += v.round();
+          }
+        }
+
+        return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+          stream: statusStream,
+          builder: (context, statusSnap) {
+            int takenToday = 0;
+            if (statusSnap.hasData) {
+              final data = statusSnap.data!.data();
+              final v = data?['takenCount'];
+              if (v is int) takenToday = v;
+              if (v is num) takenToday = v.round();
+            }
+
+            final leftText =
+                catSnap.connectionState == ConnectionState.waiting && !catSnap.hasData
+                    ? 'Left: …'
+                    : 'Left: $totalLeft';
+            final takenText = statusSnap.connectionState == ConnectionState.waiting &&
+                    !statusSnap.hasData
+                ? 'Taken today: …'
+                : 'Taken today: $takenToday';
+
+            return Text('$leftText • $takenText', style: style(), maxLines: 1);
+          },
+        );
+      },
+    );
+  }
 }
 

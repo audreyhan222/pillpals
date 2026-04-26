@@ -66,6 +66,8 @@ class NotificationService {
     await android?.requestNotificationsPermission();
   }
 
+  Future<void> requestPermissions() => _requestPermissions();
+
   Future<void> _ensureAndroidChannel() async {
     final android = _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
     await android?.createNotificationChannel(
@@ -98,7 +100,9 @@ class NotificationService {
         ),
         iOS: DarwinNotificationDetails(
           interruptionLevel: InterruptionLevel.timeSensitive,
+          presentAlert: true,
           presentSound: true,
+          presentBadge: true,
         ),
       ),
       androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
@@ -120,7 +124,9 @@ class NotificationService {
         ),
         iOS: DarwinNotificationDetails(
           interruptionLevel: InterruptionLevel.timeSensitive,
+          presentAlert: true,
           presentSound: true,
+          presentBadge: true,
         ),
       ),
       payload: payload ?? 'dev-test',

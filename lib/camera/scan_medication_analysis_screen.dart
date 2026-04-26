@@ -139,10 +139,11 @@ class _ScanMedicationAnalysisScreenState extends State<ScanMedicationAnalysisScr
         _error = 'AI analysis failed (showing OCR results instead): $e';
       });
     } finally {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+      }
     }
   }
 
@@ -223,7 +224,10 @@ class _ScanMedicationAnalysisScreenState extends State<ScanMedicationAnalysisScr
                       });
                       try {
                         final repo = MedicationRepository();
-                        await repo.addMedicationFromScan(details: details);
+                        await repo.addMedicationFromScanForSession(
+                          context: context,
+                          details: details,
+                        );
 
                         // Schedule one daily reminder per time.
                         for (int i = 0; i < details.times.length; i++) {
@@ -242,12 +246,12 @@ class _ScanMedicationAnalysisScreenState extends State<ScanMedicationAnalysisScr
                         }
 
                         if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
+                        ScaffoldMessenger.of(this.context).showSnackBar(
                           const SnackBar(content: Text('Saved + reminders scheduled.')),
                         );
                       } catch (e) {
                         if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
+                        ScaffoldMessenger.of(this.context).showSnackBar(
                           SnackBar(content: Text('Save failed: $e')),
                         );
                       } finally {

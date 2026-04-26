@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     firebase_service_account_json: str = ""
     enable_dev_push_endpoints: bool = True
 
+    # OpenAI (used by /scan-medication). Keep secrets in `backend/.env`.
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4.1-mini"
+
     _resolved_service_account_path: str | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")

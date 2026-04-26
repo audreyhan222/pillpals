@@ -8,3 +8,4 @@ pydantic-settings
 pydantic[email]
 python-multipart
 firebase-admin
+httpx

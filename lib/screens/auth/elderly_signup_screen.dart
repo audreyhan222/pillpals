@@ -1,11 +1,11 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
-import '../../api/api_client.dart';
-import '../../api/endpoints.dart';
-import '../../state/api_config_store.dart';
 import '../../state/session_store.dart';
 
 class ElderlySignupScreen extends StatefulWidget {
@@ -60,32 +60,129 @@ class _ElderlySignupScreenState extends State<ElderlySignupScreen>
     });
 
     try {
-      final baseUrl = context.read<ApiConfigStore>().baseUrl;
-      final api = ApiClient(baseUrl: baseUrl);
-      final res = await api.dio.post(ApiEndpoints.signup, data: {
-        'email': _email.text.trim(),
-        'password': _password.text,
+      final username = _email.text.trim();
+      if (username.isEmpty || _password.text.isEmpty) {
+        setState(() => _error = 'Please fill in all fields.');
+        return;
+      }
+
+      final elderlyExisting = await FirebaseFirestore.instance
+          .collection('elderly')
+          .doc(username)
+          .get();
+      final genericExisting = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(username)
+          .get();
+
+      if (elderlyExisting.exists || genericExisting.exists) {
+        setState(
+          () => _error = 'That email is already registered. Please sign in.',
+        );
+        return;
+      }
+
+      final connectCode = await _createUniqueConnectCode(username: username);
+      if (!mounted) return;
+
+      await FirebaseFirestore.instance.collection('elderly').doc(username).set({
         'name': _name.text.trim(),
+        'username': username,
+        'password': _password.text,
         'account_role': 'elderly',
+        'connectCode': connectCode,
+        'createdAt': FieldValue.serverTimestamp(),
       });
-      final data = res.data as Map<String, dynamic>;
-      final token = data['access_token'] as String?;
-      if (token == null || token.isEmpty) throw Exception('Missing token');
 
       if (!mounted) return;
       final session = context.read<SessionStore>();
-      await session.setToken(token);
       await session.setRole('elderly');
+      await session.setUsername(username);
+      if (!mounted) return;
+
+      await showDialog<void>(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: const Text('Your caregiver connect code'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Share this code with your caregiver so they can connect to your account.',
+                ),
+                const SizedBox(height: 12),
+                SelectableText(
+                  connectCode,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 2,
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: connectCode));
+                  if (context.mounted) Navigator.of(context).pop();
+                },
+                child: const Text('Copy'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Continue'),
+              ),
+            ],
+          );
+        },
+      );
+
       if (!mounted) return;
       context.go('/dashboard');
     } catch (e) {
       setState(
         () => _error =
-            'Sign up failed. Try a different email/password and verify the backend URL (Dev page).',
+            'Sign up failed. Please try again.',
       );
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  String _randomConnectCode({int length = 8}) {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    final r = Random.secure();
+    return List.generate(length, (_) => alphabet[r.nextInt(alphabet.length)]).join();
+  }
+
+  Future<String> _createUniqueConnectCode({required String username}) async {
+    // Store a mapping so a caregiver can enter a code and find the elderly user.
+    // Transaction ensures uniqueness: the code doc is only created if absent.
+    final db = FirebaseFirestore.instance;
+    for (int attempt = 0; attempt < 8; attempt++) {
+      final code = _randomConnectCode();
+      final codeRef = db.collection('connectCodes').doc(code);
+      try {
+        await db.runTransaction((txn) async {
+          final snap = await txn.get(codeRef);
+          if (snap.exists) {
+            throw StateError('Code collision');
+          }
+          txn.set(codeRef, <String, dynamic>{
+            'code': code,
+            'elderlyUsername': username,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+        });
+        return code;
+      } catch (_) {
+        // collision or transient failure; retry
+      }
+    }
+    throw Exception('Unable to generate a unique connect code. Please try again.');
   }
 
   @override

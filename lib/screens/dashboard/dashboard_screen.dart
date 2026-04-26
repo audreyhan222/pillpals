@@ -4,12 +4,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../pals/pill_pal.dart';
 import '../../state/pill_completion_store.dart';
+import '../../state/device_user_id_store.dart';
 import '../../state/session_store.dart';
 import '../../tamagotchi_backend/tamagotchi_expression_engine.dart';
 import '../../tamagotchi_backend/tamagotchi_timer_service.dart';
+
+extension _FirstOrNullExt<T> on Iterable<T> {
+  T? get firstOrNull => isEmpty ? null : first;
+}
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -28,6 +34,8 @@ class _DashboardScreenState extends State<DashboardScreen>
   String _palName = 'Pal';
   PalExpression _expression = PalExpression.neutral;
   bool _petPromptShown = false;
+  bool _palBootstrapped = false;
+  bool _palBootstrapScheduled = false;
 
   final _todayPills = const <_PillItem>[
     _PillItem(
@@ -81,6 +89,51 @@ class _DashboardScreenState extends State<DashboardScreen>
     )..start();
   }
 
+  /// Pal prefs live on `elderly/{username}` for signed-in elderly users; otherwise
+  /// `users/{deviceUserId}` (e.g. caregivers / demo).
+  Future<DocumentReference<Map<String, dynamic>>> _palPrefsDocRef(
+    SessionStore session,
+  ) async {
+    final role = session.role;
+    final username = session.username?.trim();
+    if (role == 'elderly' &&
+        username != null &&
+        username.isNotEmpty) {
+      return FirebaseFirestore.instance.collection('elderly').doc(username);
+    }
+    final userId = await DeviceUserIdStore.getOrCreate();
+    return FirebaseFirestore.instance.collection('users').doc(userId);
+  }
+
+  Future<void> _bootstrapPal() async {
+    try {
+      if (!mounted) return;
+      final session = context.read<SessionStore>();
+      final ref = await _palPrefsDocRef(session);
+      final doc = await ref.get();
+      final data = doc.data();
+      final palId = (data?['palId'] as String?)?.trim();
+      final palName = (data?['palName'] as String?)?.trim();
+      if (!mounted) return;
+
+      if (palId != null && palId.isNotEmpty) {
+        final pal = availablePillPals.where((p) => p.id == palId).firstOrNull;
+        if (pal != null) {
+          setState(() {
+            _selectedPal = pal;
+            if (palName != null && palName.isNotEmpty) _palName = palName;
+          });
+        }
+      }
+    } catch (_) {
+      // Non-fatal: we'll prompt as usual if reading fails.
+    } finally {
+      if (mounted) {
+        setState(() => _palBootstrapped = true);
+      }
+    }
+  }
+
   @override
   void dispose() {
     _petController.dispose();
@@ -89,6 +142,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Future<void> _maybePromptForPet() async {
+    if (!_palBootstrapped) return;
     if (_selectedPal != null || _petPromptShown) return;
     _petPromptShown = true;
 
@@ -106,6 +160,22 @@ class _DashboardScreenState extends State<DashboardScreen>
       _selectedPal = selected.pal;
       _palName = selected.name;
     });
+
+    try {
+      if (!mounted) return;
+      final session = context.read<SessionStore>();
+      final ref = await _palPrefsDocRef(session);
+      await ref.set(
+        <String, dynamic>{
+          'palId': selected.pal.id,
+          'palName': selected.name,
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+    } catch (_) {
+      // Non-fatal; selection still applies locally.
+    }
   }
 
   Future<void> _promptRenamePal() async {
@@ -147,6 +217,21 @@ class _DashboardScreenState extends State<DashboardScreen>
       if (!mounted) return;
       if (trimmed.isEmpty) return;
       setState(() => _palName = trimmed);
+
+      try {
+        if (!mounted) return;
+        final session = context.read<SessionStore>();
+        final ref = await _palPrefsDocRef(session);
+        await ref.set(
+          <String, dynamic>{
+            'palName': trimmed,
+            'updatedAt': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true),
+        );
+      } catch (_) {
+        // ignore
+      }
     } finally {
       controller.dispose();
     }
@@ -249,6 +334,14 @@ class _DashboardScreenState extends State<DashboardScreen>
                                     date: today,
                                     doseId: pill.doseId,
                                   );
+                                  try {
+                                    await _persistDoseTakenToFirestore(
+                                      date: today,
+                                      doseId: pill.doseId,
+                                    );
+                                  } catch (_) {
+                                    // Non-fatal: local completion still works.
+                                  }
                                   _engine.registerDoseTaken(doseId: pill.doseId);
                                   if (!mounted) return;
                                   setState(() => _expression = _engine.expression);
@@ -278,6 +371,45 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
+  Future<void> _persistDoseTakenToFirestore({
+    required DateTime date,
+    required String doseId,
+  }) async {
+    if (!mounted) return;
+    final session = context.read<SessionStore>();
+    final role = session.role;
+    final username = session.username?.trim();
+    if (role != 'elderly' || username == null || username.isEmpty) return;
+
+    final key = PillCompletionStore.dayKey(date);
+    final ref = FirebaseFirestore.instance
+        .collection('elderly')
+        .doc(username)
+        .collection('dailyStatus')
+        .doc(key);
+
+    await FirebaseFirestore.instance.runTransaction((txn) async {
+      final snap = await txn.get(ref);
+      final data = snap.data();
+      final taken = (data?['takenDoseIds'] as List?)?.cast<dynamic>() ?? const [];
+      final alreadyTaken = taken.any((e) => e.toString() == doseId);
+      if (alreadyTaken) return;
+
+      txn.set(
+        ref,
+        <String, dynamic>{
+          'dayKey': key,
+          'date': key,
+          'takenDoseIds': FieldValue.arrayUnion([doseId]),
+          'takenCount': FieldValue.increment(1),
+          'updatedAt': FieldValue.serverTimestamp(),
+          'createdAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -293,6 +425,15 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
 
     final isCaregiver = role == 'caregiver';
+
+    if (session.bootstrapped &&
+        !_palBootstrapped &&
+        !_palBootstrapScheduled) {
+      _palBootstrapScheduled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_palBootstrapped) _bootstrapPal();
+      });
+    }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _maybePromptForPet();

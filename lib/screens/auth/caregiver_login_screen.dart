@@ -1,12 +1,9 @@
-import 'package:dio/dio.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
-import '../../api/api_client.dart';
-import '../../api/endpoints.dart';
-import '../../state/api_config_store.dart';
 import '../../state/session_store.dart';
 
 class CaregiverLoginScreen extends StatefulWidget {
@@ -65,38 +62,37 @@ class _CaregiverLoginScreenState extends State<CaregiverLoginScreen>
     HapticFeedback.lightImpact();
 
     try {
-      final baseUrl = context.read<ApiConfigStore>().baseUrl;
-      final api = ApiClient(baseUrl: baseUrl);
-      final res = await api.dio.post(
-        ApiEndpoints.caregiverLogin,
-        data: {
-          'username': _username.text.trim(),
-          'password': _password.text,
-        },
-      );
-      final data = res.data as Map<String, dynamic>;
-      final token = data['access_token'] as String?;
-      if (token == null || token.isEmpty) throw Exception('Missing token');
+      final username = _username.text.trim();
+      final doc = await FirebaseFirestore.instance
+          .collection('caretaker')
+          .doc(username)
+          .get();
+
+      if (!doc.exists) {
+        setState(() => _error = 'No account found for that username.');
+        return;
+      }
+
+      final data = doc.data();
+      final storedPassword = data?['password'] as String?;
+      if (storedPassword == null || storedPassword.isEmpty) {
+        setState(() => _error = 'Account is missing a password in Firestore.');
+        return;
+      }
+
+      if (storedPassword != _password.text) {
+        setState(() => _error = 'Invalid username or password. Please try again.');
+        return;
+      }
 
       if (!mounted) return;
       final session = context.read<SessionStore>();
-      await session.setToken(token);
+      await session.setUsername(username);
       await session.setRole('caregiver');
       if (!mounted) return;
       context.go('/caregiver');
-    } on DioException catch (e) {
-      final d = e.response?.data;
-      final msg = d is Map && d['detail'] is String
-          ? d['detail'] as String
-          : d is String
-              ? d
-              : e.message;
-      if (!mounted) return;
-      setState(() => _error = msg ?? 'Sign in failed. Check backend URL in Dev and try again.');
     } catch (e) {
-      setState(
-        () => _error = 'Sign in failed. Is the API running? Set the backend URL on the Dev page.',
-      );
+      setState(() => _error = 'Sign in failed. $e');
     } finally {
       if (mounted) setState(() => _loading = false);
     }

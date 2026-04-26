@@ -72,5 +72,7 @@
 	<string>We use the camera to scan your pill bottle label for dosage and instructions.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>We save the pill bottle photo to help with analysis and review.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>We add your medication schedule to your calendar.</string>
 </dict>
 </plist>
