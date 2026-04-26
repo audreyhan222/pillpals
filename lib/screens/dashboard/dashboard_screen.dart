@@ -611,27 +611,42 @@ class _DashboardScreenState extends State<DashboardScreen>
                               final times = (data['timesMinutes'] as List?)
                                       ?.cast<dynamic>() ??
                                   const [];
-                              for (final t in times) {
-                                final minutes = t is int
-                                    ? t
-                                    : (t is num ? t.round() : null);
-                                if (minutes == null) continue;
-                                if (minutes < 0 || minutes >= 24 * 60) continue;
-                                final hour = minutes ~/ 60;
-                                final minute = minutes % 60;
-                                final tod = TimeOfDay(hour: hour, minute: minute);
-                                final timeLabel = tod.format(context);
-                                final pill = _PillItem(
-                                  name: name,
-                                  dose: dose.isEmpty ? '—' : dose,
-                                  timeLabel: timeLabel,
-                                  instructions: instructions.isEmpty
-                                      ? 'No instructions.'
-                                      : instructions,
-                                  color: const Color(0xFF4A90D9),
-                                  icon: Icons.medication_outlined,
+                              if (times.isEmpty) {
+                                pills.add(
+                                  _PillItem(
+                                    name: name,
+                                    dose: dose.isEmpty ? '—' : dose,
+                                    timeLabel: 'No time set',
+                                    instructions: instructions.isEmpty
+                                        ? 'No instructions.'
+                                        : instructions,
+                                    color: const Color(0xFF4A90D9),
+                                    icon: Icons.medication_outlined,
+                                  ),
                                 );
-                                pills.add(pill);
+                              } else {
+                                for (final t in times) {
+                                  final minutes = t is int
+                                      ? t
+                                      : (t is num ? t.round() : null);
+                                  if (minutes == null) continue;
+                                  if (minutes < 0 || minutes >= 24 * 60) continue;
+                                  final hour = minutes ~/ 60;
+                                  final minute = minutes % 60;
+                                  final tod = TimeOfDay(hour: hour, minute: minute);
+                                  final timeLabel = tod.format(context);
+                                  final pill = _PillItem(
+                                    name: name,
+                                    dose: dose.isEmpty ? '—' : dose,
+                                    timeLabel: timeLabel,
+                                    instructions: instructions.isEmpty
+                                        ? 'No instructions.'
+                                        : instructions,
+                                    color: const Color(0xFF4A90D9),
+                                    icon: Icons.medication_outlined,
+                                  );
+                                  pills.add(pill);
+                                }
                               }
                             }
                           }
