@@ -29,6 +29,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   late final AnimationController _petController;
   late final TamagotchiExpressionEngine _engine;
   late final TamagotchiTimerService _timer;
+  final Set<String> _registeredDoseIds = <String>{};
 
   PillPal? _selectedPal;
   String _palName = 'Pal';
@@ -78,6 +79,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     _engine = TamagotchiExpressionEngine(expectedDoseCount: _todayPills.length);
     for (final pill in _todayPills) {
       _engine.registerDoseNotification(doseId: pill.doseId);
+      _registeredDoseIds.add(pill.doseId);
     }
     _timer = TamagotchiTimerService(
       engine: _engine,
@@ -415,6 +417,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     final cs = Theme.of(context).colorScheme;
     final session = context.watch<SessionStore>();
     final role = session.role;
+    final username = session.username?.trim() ?? '';
 
     if (role == null || role.isEmpty) {
       // Ensure the dashboard never renders without a role chosen.
@@ -588,10 +591,70 @@ class _DashboardScreenState extends State<DashboardScreen>
                   children: [
                     _HappinessMeter(expression: _expression),
                     const SizedBox(height: 10),
-                    _TodayPillsPanel(
-                      pills: _todayPills,
-                      onPillTap: _showPillDetails,
-                    ),
+                    if (role == 'elderly' && username.isNotEmpty)
+                      StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                        stream: FirebaseFirestore.instance
+                            .collection('elderly')
+                            .doc(username)
+                            .collection('medicationCatalog')
+                            .snapshots(),
+                        builder: (context, snap) {
+                          final pills = <_PillItem>[];
+                          if (snap.hasData) {
+                            for (final doc in snap.data!.docs) {
+                              final data = doc.data();
+                              final name = (data['name'] as String?)?.trim() ?? '';
+                              if (name.isEmpty) continue;
+                              final dose = (data['dosageAmount'] as String?)?.trim() ?? '';
+                              final instructions =
+                                  (data['instructions'] as String?)?.trim() ?? '';
+                              final times = (data['timesMinutes'] as List?)
+                                      ?.cast<dynamic>() ??
+                                  const [];
+                              for (final t in times) {
+                                final minutes = t is int
+                                    ? t
+                                    : (t is num ? t.round() : null);
+                                if (minutes == null) continue;
+                                if (minutes < 0 || minutes >= 24 * 60) continue;
+                                final hour = minutes ~/ 60;
+                                final minute = minutes % 60;
+                                final tod = TimeOfDay(hour: hour, minute: minute);
+                                final timeLabel = tod.format(context);
+                                final pill = _PillItem(
+                                  name: name,
+                                  dose: dose.isEmpty ? '—' : dose,
+                                  timeLabel: timeLabel,
+                                  instructions: instructions.isEmpty
+                                      ? 'No instructions.'
+                                      : instructions,
+                                  color: const Color(0xFF4A90D9),
+                                  icon: Icons.medication_outlined,
+                                );
+                                pills.add(pill);
+                              }
+                            }
+                          }
+
+                          pills.sort((a, b) => a.doseId.compareTo(b.doseId));
+
+                          for (final p in pills) {
+                            if (_registeredDoseIds.add(p.doseId)) {
+                              _engine.registerDoseNotification(doseId: p.doseId);
+                            }
+                          }
+
+                          return _TodayPillsPanel(
+                            pills: pills.isEmpty ? _todayPills : pills,
+                            onPillTap: _showPillDetails,
+                          );
+                        },
+                      )
+                    else
+                      _TodayPillsPanel(
+                        pills: _todayPills,
+                        onPillTap: _showPillDetails,
+                      ),
                   ],
                 ),
               ),

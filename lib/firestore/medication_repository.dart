@@ -39,6 +39,7 @@ class MedicationRepository {
         dosageAmount: details.dosage,
         dosageSchedule: schedule,
         timesMinutes: timesMinutes,
+        instructions: details.instructions,
       );
       return;
     }
