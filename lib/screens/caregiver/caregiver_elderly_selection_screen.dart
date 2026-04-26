@@ -169,7 +169,9 @@ class _CaregiverElderlySelectionScreenState
               'connectCode': code,
               'elderlyUsername': elderlyUsername,
               'elderlyName': elderlyName,
-              'linkedAt': FieldValue.serverTimestamp(),
+              // NOTE: serverTimestamp is not allowed inside arrayUnion elements.
+              // Use a concrete timestamp value to avoid crashes.
+              'linkedAt': Timestamp.now(),
             }
           ]),
           'updatedAt': FieldValue.serverTimestamp(),
@@ -536,6 +538,12 @@ class _PatientDayStatusLine extends StatelessWidget {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: catalogStream,
       builder: (context, catSnap) {
+        if (catSnap.hasData && catSnap.data!.docs.isEmpty) {
+          // "Throw exception" behavior requested: treat empty catalog as a non-fatal
+          // exceptional state and show an explicit "no medications" status instead.
+          return Text('No medications', style: style(), maxLines: 1);
+        }
+
         int totalLeft = 0;
         if (catSnap.hasData) {
           for (final doc in catSnap.data!.docs) {
@@ -565,7 +573,18 @@ class _PatientDayStatusLine extends StatelessWidget {
                 ? 'Taken today: …'
                 : 'Taken today: $takenToday';
 
-            return Text('$leftText • $takenText', style: style(), maxLines: 1);
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.62),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.85),
+                  width: 1.2,
+                ),
+              ),
+              child: Text('$leftText • $takenText', style: style(), maxLines: 1),
+            );
           },
         );
       },
