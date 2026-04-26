@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -7,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../firestore/elderly_medication_catalog_repository.dart';
+import '../notifications/notification_service.dart';
 import '../state/session_store.dart';
 import '../theme/app_colors.dart';
 import 'pill_bottle_text_recognizer.dart';
@@ -115,11 +117,59 @@ class _PillBottleCameraPageState extends State<PillBottleCameraPage> {
   }
 
   Future<void> _addTime() async {
-    final selected = await showTimePicker(
+    TimeOfDay selected = const TimeOfDay(hour: 9, minute: 0);
+    final ok = await showModalBottomSheet<bool>(
       context: context,
-      initialTime: const TimeOfDay(hour: 9, minute: 0),
+      showDragHandle: true,
+      useSafeArea: true,
+      builder: (context) {
+        return SizedBox(
+          height: 340,
+          child: Column(
+            children: [
+              const SizedBox(height: 6),
+              const Text(
+                'Pick a time',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: CupertinoDatePicker(
+                  mode: CupertinoDatePickerMode.time,
+                  use24hFormat: false,
+                  initialDateTime: DateTime(2020, 1, 1, selected.hour, selected.minute),
+                  onDateTimeChanged: (dt) {
+                    selected = TimeOfDay(hour: dt.hour, minute: dt.minute);
+                  },
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextButton(
+                        onPressed: () => Navigator.of(context).pop(false),
+                        child: const Text('Cancel'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () => Navigator.of(context).pop(true),
+                        child: const Text('Add'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
-    if (selected == null || !mounted) return;
+
+    if (ok != true || !mounted) return;
     setState(() {
       final exists = _times.any(
         (time) => time.hour == selected.hour && time.minute == selected.minute,
@@ -161,9 +211,10 @@ class _PillBottleCameraPageState extends State<PillBottleCameraPage> {
     final name = TextEditingController(text: _nameController.text.trim());
     final totalLeft = TextEditingController();
     final dosageAmount = TextEditingController(text: _dosageController.text.trim());
-    final dosageSchedule = TextEditingController(
-      text: _times.isEmpty ? '' : 'Daily at ${_times.map((t) => t.format(context)).join(', ')}',
-    );
+    final instructions = TextEditingController(text: _instructionsController.text.trim());
+    final manualTimes = <TimeOfDay>[
+      ..._times,
+    ]..sort((a, b) => (a.hour * 60 + a.minute).compareTo(b.hour * 60 + b.minute));
 
     try {
       final saved = await showDialog<bool>(
@@ -204,15 +255,140 @@ class _PillBottleCameraPageState extends State<PillBottleCameraPage> {
                   ),
                   const SizedBox(height: 10),
                   TextField(
-                    controller: dosageSchedule,
+                    controller: instructions,
                     textInputAction: TextInputAction.done,
                     minLines: 2,
                     maxLines: 3,
                     decoration: const InputDecoration(
-                      labelText: 'Dosage schedule',
-                      hintText: 'e.g. Daily at 9am and 9pm',
+                      labelText: 'Instructions',
+                      hintText: 'e.g. Take with food',
                     ),
                   ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Times',
+                          style: TextStyle(fontWeight: FontWeight.w900),
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: () async {
+                          TimeOfDay selected = const TimeOfDay(hour: 9, minute: 0);
+                          final ok = await showModalBottomSheet<bool>(
+                            context: context,
+                            showDragHandle: true,
+                            useSafeArea: true,
+                            builder: (context) {
+                              return SizedBox(
+                                height: 340,
+                                child: Column(
+                                  children: [
+                                    const SizedBox(height: 6),
+                                    const Text(
+                                      'Pick a time',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Expanded(
+                                      child: CupertinoDatePicker(
+                                        mode: CupertinoDatePickerMode.time,
+                                        use24hFormat: false,
+                                        initialDateTime: DateTime(
+                                          2020,
+                                          1,
+                                          1,
+                                          selected.hour,
+                                          selected.minute,
+                                        ),
+                                        onDateTimeChanged: (dt) {
+                                          selected = TimeOfDay(
+                                            hour: dt.hour,
+                                            minute: dt.minute,
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                    Padding(
+                                      padding: const EdgeInsets.fromLTRB(
+                                        16,
+                                        8,
+                                        16,
+                                        16,
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Expanded(
+                                            child: TextButton(
+                                              onPressed: () =>
+                                                  Navigator.of(context).pop(false),
+                                              child: const Text('Cancel'),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: FilledButton(
+                                              onPressed: () =>
+                                                  Navigator.of(context).pop(true),
+                                              child: const Text('Add'),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          );
+                          if (ok != true) return;
+                          final exists = manualTimes.any(
+                            (t) => t.hour == selected.hour && t.minute == selected.minute,
+                          );
+                          if (!exists) {
+                            manualTimes.add(selected);
+                            manualTimes.sort(
+                              (a, b) => (a.hour * 60 + a.minute)
+                                  .compareTo(b.hour * 60 + b.minute),
+                            );
+                          }
+                          (context as Element).markNeedsBuild();
+                        },
+                        icon: const Icon(Icons.add_alarm_rounded),
+                        label: const Text('Add'),
+                      ),
+                    ],
+                  ),
+                  if (manualTimes.isEmpty)
+                    const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text('No times added yet.'),
+                    )
+                  else
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: manualTimes
+                            .map(
+                              (t) => InputChip(
+                                label: Text(t.format(context)),
+                                onDeleted: () {
+                                  manualTimes.removeWhere(
+                                    (x) => x.hour == t.hour && x.minute == t.minute,
+                                  );
+                                  (context as Element).markNeedsBuild();
+                                },
+                              ),
+                            )
+                            .toList(),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -234,13 +410,34 @@ class _PillBottleCameraPageState extends State<PillBottleCameraPage> {
 
       final trimmedName = name.text.trim();
       final left = int.tryParse(totalLeft.text.trim()) ?? 0;
+      final times = manualTimes.toList()
+        ..sort((a, b) => (a.hour * 60 + a.minute).compareTo(b.hour * 60 + b.minute));
+      final timesMinutes = times.map((t) => t.hour * 60 + t.minute).toList();
+      final schedule = times.isEmpty
+          ? ''
+          : 'Daily at ${times.map((t) => t.format(context)).join(', ')}';
       await ElderlyMedicationCatalogRepository().upsertMedication(
         elderlyUsername: username,
         name: trimmedName,
         totalLeft: left,
         dosageAmount: dosageAmount.text.trim(),
-        dosageSchedule: dosageSchedule.text.trim(),
+        dosageSchedule: schedule,
+        timesMinutes: timesMinutes,
+        instructions: instructions.text.trim(),
       );
+
+      // Schedule a daily local notification at each chosen time.
+      for (final t in times) {
+        final medName = trimmedName.isEmpty ? 'Medication' : trimmedName;
+        final id = (medName.hashCode ^ (t.hour * 60 + t.minute)).abs() % 2147483647;
+        await NotificationService.instance.scheduleDailyDoseReminder(
+          id: id,
+          time: t,
+          title: medName,
+          body: 'pill time!',
+          payload: medName,
+        );
+      }
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -250,7 +447,7 @@ class _PillBottleCameraPageState extends State<PillBottleCameraPage> {
       name.dispose();
       totalLeft.dispose();
       dosageAmount.dispose();
-      dosageSchedule.dispose();
+      instructions.dispose();
     }
   }
 

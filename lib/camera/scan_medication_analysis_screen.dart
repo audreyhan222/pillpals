@@ -233,12 +233,14 @@ class _ScanMedicationAnalysisScreenState extends State<ScanMedicationAnalysisScr
                         for (int i = 0; i < details.times.length; i++) {
                           final t = details.times[i];
                           final name = details.name.isEmpty ? 'Medication' : details.name;
-                          final doseId = '${name.toLowerCase()}_${t.hour.toString().padLeft(2, '0')}${t.minute.toString().padLeft(2, '0')}';
-                          await NotificationService.instance.scheduleEscalatingDoseReminder(
-                            doseId: doseId,
-                            medicationName: name,
-                            dosageText: details.dosage,
+                          final id =
+                              (name.hashCode ^ (t.hour * 60 + t.minute)).abs() % 2147483647;
+                          await NotificationService.instance.scheduleDailyDoseReminder(
+                            id: id,
                             time: t,
+                            title: name,
+                            body: 'pill time!',
+                            payload: name,
                           );
                         }
 
