@@ -20,6 +20,16 @@ extension _FirstOrNullExt<T> on Iterable<T> {
   T? get firstOrNull => isEmpty ? null : first;
 }
 
+/// Red 8:55 AM demo on Today’s pills (mock + empty state) for this user only.
+const kRedTimeDemoPillUserId = 'FDB2EMND';
+
+bool isRedTimeDemoPillUser({String? deviceUserId, String? sessionUsername}) {
+  final a = (deviceUserId ?? '').trim();
+  if (a == kRedTimeDemoPillUserId) return true;
+  if ((sessionUsername ?? '').trim() == kRedTimeDemoPillUserId) return true;
+  return false;
+}
+
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
@@ -30,8 +40,12 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _petController;
-  late final TamagotchiExpressionEngine _engine;
-  late final TamagotchiTimerService _timer;
+  TamagotchiExpressionEngine? _engine;
+  TamagotchiTimerService? _timer;
+  bool _tamagotchiReady = false;
+  String? _deviceUserId;
+  /// Non-Firestore “Today’s pills” list (caregiver / demo); chosen after [DeviceUserIdStore] resolves.
+  List<_PillItem> _mockPills = _kDefaultMockTodayPills;
   final Set<String> _registeredDoseIds = <String>{};
   StreamSubscription<NotificationEvent>? _notifSub;
   StreamSubscription? _nudgeSub;
@@ -45,39 +59,6 @@ class _DashboardScreenState extends State<DashboardScreen>
   bool _palBootstrapped = false;
   bool _palBootstrapScheduled = false;
 
-  final _todayPills = const <_PillItem>[
-    _PillItem(
-      name: 'Metformin',
-      dose: '500mg',
-      timeLabel: '8:00 AM',
-      instructions:
-          'Take with food. If you feel nauseous, drink water and eat a small snack.',
-      color: Color(0xFF4A90D9),
-      icon: Icons.medication_outlined,
-      minutesOfDay: 8 * 60,
-    ),
-    _PillItem(
-      name: 'Vitamin D',
-      dose: '1 capsule',
-      timeLabel: '2:00 PM',
-      instructions:
-          'Take with a meal. If you miss it, you can take it later today.',
-      color: Color(0xFFE5A800),
-      icon: Icons.sunny,
-      minutesOfDay: 14 * 60,
-    ),
-    _PillItem(
-      name: 'Atorvastatin',
-      dose: '20mg',
-      timeLabel: '9:00 PM',
-      instructions:
-          'Take at night. Avoid grapefruit. If you have muscle pain, tell your doctor.',
-      color: Color(0xFF7DB8F7),
-      icon: Icons.nightlight_round,
-      minutesOfDay: 21 * 60,
-    ),
-  ];
-
   @override
   void initState() {
     super.initState();
@@ -86,51 +67,8 @@ class _DashboardScreenState extends State<DashboardScreen>
       duration: const Duration(milliseconds: 2400),
     )..repeat();
 
-    _engine = TamagotchiExpressionEngine(expectedDoseCount: _todayPills.length);
-    for (final pill in _todayPills) {
-      _engine.registerDoseNotification(doseId: pill.doseId);
-      _registeredDoseIds.add(pill.doseId);
-    }
-    _timer = TamagotchiTimerService(
-      engine: _engine,
-      tickInterval: const Duration(seconds: 10),
-      onExpressionChanged: (expr) {
-        if (!mounted) return;
-        setState(() {
-          _expression = expr;
-          _happiness = _engine.happiness;
-        });
-      },
-      onTick: () {
-        if (!mounted) return;
-        // Ensure the happiness meter repaints even if expression didn't change.
-        setState(() => _happiness = _engine.happiness);
-      },
-    )..start();
-
-    _notifSub = NotificationService.instance.eventStream.listen((event) {
-      final parsed = DoseReminderPayload.tryDecode(event.payload);
-      if (parsed == null) return;
-      // Stage 2 is +5 minutes after pill time.
-      if (parsed.stage == 2) {
-        _engine.applyHappinessPenalty(0.25);
-        if (mounted) {
-          setState(() {
-            _expression = _engine.expression;
-            _happiness = _engine.happiness;
-          });
-        }
-      }
-      // Stage 3 is +10 minutes after pill time.
-      if (parsed.stage == 3) {
-        _engine.applyHappinessPenalty(0.30);
-        if (mounted) {
-          setState(() {
-            _expression = _engine.expression;
-            _happiness = _engine.happiness;
-          });
-        }
-      }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_bootstrapTamagotchi());
     });
 
     // Caregiver nudges (Firestore → local notification).
@@ -200,6 +138,92 @@ class _DashboardScreenState extends State<DashboardScreen>
     });
   }
 
+  Future<void> _bootstrapTamagotchi() async {
+    try {
+      final id = await DeviceUserIdStore.getOrCreate();
+      if (!mounted) return;
+      final uname = context.read<SessionStore>().username?.trim();
+      final useRed = isRedTimeDemoPillUser(deviceUserId: id, sessionUsername: uname);
+      final pills = useRed ? _kRedTimeDemoMockTodayPills : _kDefaultMockTodayPills;
+      setState(() {
+        _deviceUserId = id;
+        _mockPills = pills;
+      });
+      _engine = TamagotchiExpressionEngine(expectedDoseCount: pills.length);
+      for (final pill in pills) {
+        _engine!.registerDoseNotification(doseId: pill.doseId);
+        _registeredDoseIds.add(pill.doseId);
+      }
+      _timer = TamagotchiTimerService(
+        engine: _engine!,
+        tickInterval: const Duration(seconds: 10),
+        onExpressionChanged: (expr) {
+          if (!mounted) return;
+          setState(() {
+            _expression = expr;
+            _happiness = _engine!.happiness;
+          });
+        },
+        onTick: () {
+          if (!mounted) return;
+          setState(() => _happiness = _engine!.happiness);
+        },
+      )..start();
+
+      _notifSub = NotificationService.instance.eventStream.listen((event) {
+        final parsed = DoseReminderPayload.tryDecode(event.payload);
+        if (parsed == null) return;
+        if (parsed.stage == 2) {
+          _engine?.applyHappinessPenalty(0.25);
+          if (mounted) {
+            setState(() {
+              _expression = _engine!.expression;
+              _happiness = _engine!.happiness;
+            });
+          }
+        }
+        if (parsed.stage == 3) {
+          _engine?.applyHappinessPenalty(0.30);
+          if (mounted) {
+            setState(() {
+              _expression = _engine!.expression;
+              _happiness = _engine!.happiness;
+            });
+          }
+        }
+      });
+    } catch (_) {
+      if (!mounted) return;
+      const pills = _kDefaultMockTodayPills;
+      setState(() {
+        _mockPills = pills;
+      });
+      _engine = TamagotchiExpressionEngine(expectedDoseCount: pills.length);
+      for (final pill in pills) {
+        _engine!.registerDoseNotification(doseId: pill.doseId);
+        _registeredDoseIds.add(pill.doseId);
+      }
+      _timer = TamagotchiTimerService(
+        engine: _engine!,
+        tickInterval: const Duration(seconds: 10),
+        onExpressionChanged: (expr) {
+          if (!mounted) return;
+          setState(() {
+            _expression = expr;
+            _happiness = _engine!.happiness;
+          });
+        },
+        onTick: () {
+          if (!mounted) return;
+          setState(() => _happiness = _engine!.happiness);
+        },
+      )..start();
+    }
+    if (mounted) {
+      setState(() => _tamagotchiReady = true);
+    }
+  }
+
   /// Pal prefs live on `elderly/{username}` for signed-in elderly users; otherwise
   /// `users/{deviceUserId}` (e.g. caregivers / demo).
   Future<DocumentReference<Map<String, dynamic>>> _palPrefsDocRef(
@@ -248,7 +272,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   @override
   void dispose() {
     _petController.dispose();
-    _timer.dispose();
+    _timer?.dispose();
     _notifSub?.cancel();
     _nudgeSub?.cancel();
     super.dispose();
@@ -802,7 +826,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                                     final intervalHours = (intervalMinutes / 60.0).clamp(0.0, 24.0);
                                     // Slow the gain rate a bit so it feels more earned.
                                     final delta = intervalHours / 48.0;
-                                    _engine.registerDoseTaken(
+                                    _engine!.registerDoseTaken(
                                       doseId: pill.doseId,
                                       happinessDelta: delta,
                                     );
@@ -817,8 +841,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                                   }
                                   if (!mounted) return;
                                   setState(() {
-                                    _expression = _engine.expression;
-                                    _happiness = _engine.happiness;
+                                    _expression = _engine!.expression;
+                                    _happiness = _engine!.happiness;
                                   });
                                   if (context.mounted) context.pop();
                                 },
@@ -934,6 +958,12 @@ class _DashboardScreenState extends State<DashboardScreen>
         if (mounted) context.go('/role');
       });
       return const Scaffold(body: SizedBox.shrink());
+    }
+
+    if (!_tamagotchiReady) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
     }
 
     final isCaregiver = role == 'caregiver';
@@ -1176,7 +1206,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 
                           for (final p in pills) {
                             if (_registeredDoseIds.add(p.doseId)) {
-                              _engine.registerDoseNotification(doseId: p.doseId);
+                              _engine!.registerDoseNotification(doseId: p.doseId);
                             }
                           }
 
@@ -1190,18 +1220,26 @@ class _DashboardScreenState extends State<DashboardScreen>
                           return _TodayPillsPanel(
                             pills: remaining.isEmpty ? const <_PillItem>[] : remaining,
                             onPillTap: _showPillDetails,
+                            showEmptyStateRedDemoPill: isRedTimeDemoPillUser(
+                              deviceUserId: _deviceUserId,
+                              sessionUsername: username.isEmpty ? null : username,
+                            ),
                           );
                         },
                       )
                     else
                       _TodayPillsPanel(
-                        pills: _todayPills
+                        pills: _mockPills
                             .where((p) => !context.watch<PillCompletionStore>().isDoseTaken(
                                   date: DateTime.now(),
                                   doseId: p.doseId,
                                 ))
                             .toList(),
                         onPillTap: _showPillDetails,
+                        showEmptyStateRedDemoPill: isRedTimeDemoPillUser(
+                          deviceUserId: _deviceUserId,
+                          sessionUsername: username.isEmpty ? null : username,
+                        ),
                       ),
                   ],
                 ),
@@ -1662,10 +1700,16 @@ class _AnimatedHappinessMeterState extends State<_AnimatedHappinessMeter>
 }
 
 class _TodayPillsPanel extends StatefulWidget {
-  const _TodayPillsPanel({required this.pills, required this.onPillTap});
+  const _TodayPillsPanel({
+    required this.pills,
+    required this.onPillTap,
+    this.showEmptyStateRedDemoPill = false,
+  });
 
   final List<_PillItem> pills;
   final ValueChanged<_PillItem> onPillTap;
+  /// [kRedTimeDemoPillUserId] only: empty list shows a tappable 8:55 AM sample in red.
+  final bool showEmptyStateRedDemoPill;
 
   @override
   State<_TodayPillsPanel> createState() => _TodayPillsPanelState();
@@ -1744,15 +1788,50 @@ class _TodayPillsPanelState extends State<_TodayPillsPanel> {
           SizedBox(
             height: 190,
             child: pills.isEmpty
-                ? Center(
-                    child: Text(
-                      'All done for today 🎉',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w900,
-                        color: Colors.black.withValues(alpha: 0.6),
-                      ),
-                    ),
-                  )
+                ? (widget.showEmptyStateRedDemoPill
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Center(
+                            child: Text(
+                              'All done for today 🎉',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w900,
+                                color: Colors.black.withValues(alpha: 0.6),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Center(
+                            child: Text(
+                              'Sample pill for this device',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.black.withValues(alpha: 0.4),
+                                letterSpacing: 0.2,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Expanded(
+                            child: _PillTile(
+                              pill: _kEmptyStateExamplePill,
+                              asOf: now,
+                              onTap: () => onPillTap(_kEmptyStateExamplePill),
+                            ),
+                          ),
+                        ],
+                      )
+                    : Center(
+                        child: Text(
+                          'All done for today 🎉',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w900,
+                            color: Colors.black.withValues(alpha: 0.6),
+                          ),
+                        ),
+                      ))
                 : ListView.separated(
                     padding: EdgeInsets.zero,
                     itemCount: pills.length,
@@ -1796,6 +1875,16 @@ String _formatHrsMinsUpcoming(Duration d) {
   return '${h}h ${m}m';
 }
 
+const _kPillTimeEmphasis = Color(0xFFE85D4C);
+
+/// Red time for 11:55 AM, or an explicit [PillItem.timeLabelColor] (e.g. demo 8:55).
+Color? _highlightTimeColorForPill(_PillItem pill) {
+  if (pill.timeLabelColor != null) return pill.timeLabelColor;
+  final m = pill.minutesOfDay;
+  if (m == 11 * 60 + 55) return _kPillTimeEmphasis;
+  return null;
+}
+
 class _PillTile extends StatelessWidget {
   const _PillTile({required this.pill, required this.asOf, required this.onTap});
 
@@ -1808,6 +1897,7 @@ class _PillTile extends StatelessWidget {
     final remaining = _doseTimeRemainingLabel(pill, asOf);
     final isOverdue = remaining == 'Overdue';
     final isUnset = remaining.isEmpty;
+    final timeColor = _highlightTimeColorForPill(pill);
 
     return Material(
       color: Colors.white.withValues(alpha: 0.6),
@@ -1844,16 +1934,38 @@ class _PillTile extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 2),
-                    Text(
-                      '${pill.dose} • ${pill.timeLabel}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.black.withValues(alpha: 0.58),
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
+                    timeColor == null
+                        ? Text(
+                            '${pill.dose} • ${pill.timeLabel}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.black.withValues(alpha: 0.58),
+                              fontWeight: FontWeight.w700,
+                            ),
+                          )
+                        : Text.rich(
+                            TextSpan(
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: Colors.black.withValues(alpha: 0.58),
+                                fontWeight: FontWeight.w700,
+                              ),
+                              children: [
+                                TextSpan(text: '${pill.dose} • '),
+                                TextSpan(
+                                  text: pill.timeLabel,
+                                  style: TextStyle(
+                                    color: timeColor,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                   ],
                 ),
               ),
@@ -1896,6 +2008,7 @@ class _PillItem {
     required this.name,
     required this.dose,
     required this.timeLabel,
+    this.timeLabelColor,
     required this.instructions,
     required this.color,
     required this.icon,
@@ -1908,6 +2021,8 @@ class _PillItem {
   final String name;
   final String dose;
   final String timeLabel;
+  /// When set, [timeLabel] is shown in this color (e.g. red for 8:55 AM emphasis).
+  final Color? timeLabelColor;
   final String instructions;
   final Color color;
   final IconData icon;
@@ -1924,6 +2039,85 @@ class _PillItem {
     return '${name.toLowerCase()}_$hh$mm';
   }
 }
+
+const _kDefaultMockTodayPills = <_PillItem>[
+  _PillItem(
+    name: 'Metformin',
+    dose: '500mg',
+    timeLabel: '8:00 AM',
+    instructions:
+        'Take with food. If you feel nauseous, drink water and eat a small snack.',
+    color: Color(0xFF4A90D9),
+    icon: Icons.medication_outlined,
+    minutesOfDay: 8 * 60,
+  ),
+  _PillItem(
+    name: 'Vitamin D',
+    dose: '1 capsule',
+    timeLabel: '2:00 PM',
+    instructions:
+        'Take with a meal. If you miss it, you can take it later today.',
+    color: Color(0xFFE5A800),
+    icon: Icons.sunny,
+    minutesOfDay: 14 * 60,
+  ),
+  _PillItem(
+    name: 'Atorvastatin',
+    dose: '20mg',
+    timeLabel: '9:00 PM',
+    instructions:
+        'Take at night. Avoid grapefruit. If you have muscle pain, tell your doctor.',
+    color: Color(0xFF7DB8F7),
+    icon: Icons.nightlight_round,
+    minutesOfDay: 21 * 60,
+  ),
+];
+
+const _kRedTimeDemoMockTodayPills = <_PillItem>[
+  _PillItem(
+    name: 'Metformin',
+    dose: '500mg',
+    timeLabel: '8:55 AM',
+    timeLabelColor: Color(0xFFE85D4C),
+    instructions:
+        'Take with food. If you feel nauseous, drink water and eat a small snack.',
+    color: Color(0xFF4A90D9),
+    icon: Icons.medication_outlined,
+    minutesOfDay: 8 * 60 + 55,
+  ),
+  _PillItem(
+    name: 'Vitamin D',
+    dose: '1 capsule',
+    timeLabel: '2:00 PM',
+    instructions:
+        'Take with a meal. If you miss it, you can take it later today.',
+    color: Color(0xFFE5A800),
+    icon: Icons.sunny,
+    minutesOfDay: 14 * 60,
+  ),
+  _PillItem(
+    name: 'Atorvastatin',
+    dose: '20mg',
+    timeLabel: '9:00 PM',
+    instructions:
+        'Take at night. Avoid grapefruit. If you have muscle pain, tell your doctor.',
+    color: Color(0xFF7DB8F7),
+    icon: Icons.nightlight_round,
+    minutesOfDay: 21 * 60,
+  ),
+];
+
+/// Shown for [kRedTimeDemoPillUserId] when there are no remaining doses (same pill behavior as a real row; time in red only).
+const _kEmptyStateExamplePill = _PillItem(
+  name: "Today's sample",
+  dose: '10 mg',
+  timeLabel: '8:55 AM',
+  timeLabelColor: Color(0xFFE85D4C),
+  instructions: 'This is a sample for your device ID so you can see how a scheduled time is highlighted.',
+  color: Color(0xFF4A90D9),
+  icon: Icons.medication_outlined,
+  minutesOfDay: 535,
+);
 
 class _PetPickerDialog extends StatelessWidget {
   const _PetPickerDialog();

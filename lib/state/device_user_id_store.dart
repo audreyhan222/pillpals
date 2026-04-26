@@ -16,5 +16,12 @@ class DeviceUserIdStore {
     await _storage.write(key: _key, value: id);
     return id;
   }
+
+  /// Replace the stored id (e.g. set to `FDB2EMND` to enable the red 8:55 AM today’s-pill demo on the dashboard).
+  static Future<void> writeId(String id) async {
+    final t = id.trim();
+    if (t.isEmpty) return;
+    await _storage.write(key: _key, value: t);
+  }
 }
 
