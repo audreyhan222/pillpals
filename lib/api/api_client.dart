@@ -5,8 +5,10 @@ class ApiClient {
       : dio = Dio(
           BaseOptions(
             baseUrl: baseUrl,
-            connectTimeout: const Duration(seconds: 10),
-            receiveTimeout: const Duration(seconds: 20),
+            // The backend can take a bit (OCR → network → LLM), and iOS devices
+            // on Wi‑Fi may have slower initial connects to a dev machine.
+            connectTimeout: const Duration(seconds: 25),
+            receiveTimeout: const Duration(seconds: 60),
             headers: token != null ? {'Authorization': 'Bearer $token'} : null,
           ),
         );

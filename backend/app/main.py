@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List
 
 import httpx
+from dotenv import dotenv_values
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select
@@ -59,6 +60,21 @@ from .caregiver_local import (
 )
 
 log = logging.getLogger(__name__)
+
+
+def _scan_medication_forced_overrides() -> tuple[str, str, str]:
+    """
+    Dev-only helper: read overrides from backend/.env on each request.
+    This avoids needing to restart the server when toggling debug overrides.
+    """
+    try:
+        values = dotenv_values(".env") or {}
+    except Exception:
+        values = {}
+    name = (values.get("SCAN_MEDICATION_FORCE_NAME") or "").strip()
+    dosage = (values.get("SCAN_MEDICATION_FORCE_DOSAGE") or "").strip()
+    instructions = (values.get("SCAN_MEDICATION_FORCE_INSTRUCTIONS") or "").strip()
+    return name, dosage, instructions
 
 app = FastAPI(title=settings.app_name)
 
@@ -705,19 +721,43 @@ def caregiver_alert(
 @app.post("/scan-medication", response_model=ScanMedicationOut)
 async def scan_medication(payload: ScanMedicationIn):
     """
-    LLM-backed extraction from OCR text → {name,dosage,instructions}.
+    LLM-backed extraction from OCR text → {name,dosage,instructions,frequency_per_day,recommended_times_minutes}.
     Falls back to a tiny heuristic if OPENAI_API_KEY isn't configured.
     """
     text = payload.text.strip()
     if not text:
-        return ScanMedicationOut(name="", dosage="", instructions="")
+        return ScanMedicationOut(
+            name="",
+            dosage="",
+            instructions="",
+            frequency_per_day=0,
+            recommended_times_minutes=[],
+        )
+
+    # Debug/testing override: force the medication name deterministically.
+    forced_name, forced_dosage, forced_instructions = _scan_medication_forced_overrides()
+    if forced_name or forced_dosage or forced_instructions:
+        return ScanMedicationOut(
+            name=forced_name,
+            dosage=forced_dosage,
+            instructions=forced_instructions,
+            frequency_per_day=0,
+            recommended_times_minutes=[],
+        )
 
     if not (settings.openai_api_key or "").strip():
-        # Fallback: keep previous mock-ish behavior (better than throwing).
+        # Fallback: return best-effort *non-placeholder* values.
+        # (Client-side local parsing already handles "see label" style UX.)
         name = text.splitlines()[0][:40] if text else "Medication"
-        dosage = "See label" if "mg" in text.lower() else "1 pill"
-        instructions = "Take as directed."
-        return ScanMedicationOut(name=name, dosage=dosage, instructions=instructions)
+        dosage = ""
+        instructions = ""
+        return ScanMedicationOut(
+            name=name,
+            dosage=dosage,
+            instructions=instructions,
+            frequency_per_day=0,
+            recommended_times_minutes=[],
+        )
 
     # Lightweight hints help the model avoid picking the wrong line from noisy OCR.
     hints = _ocr_hints(text)
@@ -730,10 +770,30 @@ async def scan_medication(payload: ScanMedicationIn):
         "Rules:\n"
         "- Output must match the provided JSON schema (no extra keys).\n"
         "- Use empty string when unknown.\n"
-        "- name: medication name only (exclude patient/pharmacy/address/doctor/Rx#).\n"
-        "- dosage: include strength + form if present (e.g. '500 mg tablet', '10 mL', '2 puffs').\n"
-        "- instructions: the SIG / directions for use (e.g. 'Take 1 tablet by mouth twice daily with food').\n"
-        "- If multiple candidates exist, choose the most medication-like.\n"
+        "- Use 0 / [] when unknown for numeric/list fields.\n"
+        "- IMPORTANT: map OCR into fields like this:\n"
+        "  - name: the drug name line ONLY (e.g. 'bromphen-PSE-DM') and nothing about dose or directions.\n"
+        "  - dosage: the label strength/concentration line ONLY (e.g. '2-30-10 mg/5 mL' or '500 mg tablet').\n"
+        "    If both a concentration line (mg/5mL) and a 'Take 10 mL' dose-amount line exist, dosage should be the concentration line.\n"
+        "  - instructions: the route + cadence ONLY (e.g. 'by mouth every 6 hours', 'swallow', 'take by mouth').\n"
+        "    Do NOT include the numeric strength (mL/mg) in instructions if it is already captured in dosage.\n"
+        "- name: copy the ENTIRE LINE that states the medication/drug name (do not truncate),\n"
+        "  but still exclude obvious non-drug lines like patient/pharmacy/address/doctor/Rx#.\n"
+        "- IMPORTANT name heuristic: prescription labels often contain dash-separated abbreviated chemical/drug names.\n"
+        "  If you see a line with multiple uppercase segments separated by dashes (e.g. 'ABCD-EFGH' or 'FOO-BAR-BAZ'),\n"
+        "  that is a VERY strong candidate for the medication name.\n"
+        "  Keep the ENTIRE dash-separated phrase (do not truncate to a single segment), because it may represent multiple combined chemicals.\n"
+        "  Prefer that over addresses, phone numbers, patient names, or IDs.\n"
+        "- dosage: usually appears as a number + unit inside the description (e.g. '5 mg', '10 mL', '250 mcg').\n"
+        "  Return the strength (and form if present) but do not return vague text.\n"
+        "- instructions: should read like 'take by mouth', 'swallow', 'liquid to swallow', etc.\n"
+        "  Instructions usually do NOT contain numbers; if you only find numbered SIG text, prefer the non-number wording if present.\n"
+        "  If the OCR contains an interval like 'every 6 hours', include that phrase in instructions.\n"
+        "- frequency_per_day: integer number of times per day (1..12), or 0 if unknown.\n"
+        "- recommended_times_minutes: list of minutes since midnight (0..1439), length should match frequency_per_day when possible.\n"
+        "  If the label says 'twice daily' and no times are provided, choose reasonable defaults like [540, 1260] (9:00, 21:00).\n"
+        "  If the label is interval-based (e.g. 'every 6 hours') and no start time is provided, you may set frequency_per_day but return recommended_times_minutes as [].\n"
+        "- NEVER output placeholder dosage/instructions like 'see label', 'refer to label', 'see bottle', 'take as directed'. If unknown, return empty string.\n"
         "- Never invent details not supported by the OCR."
     )
 
@@ -750,8 +810,19 @@ async def scan_medication(payload: ScanMedicationIn):
             "name": {"type": "string"},
             "dosage": {"type": "string"},
             "instructions": {"type": "string"},
+            "frequency_per_day": {"type": "integer"},
+            "recommended_times_minutes": {
+                "type": "array",
+                "items": {"type": "integer"},
+            },
         },
-        "required": ["name", "dosage", "instructions"],
+        "required": [
+            "name",
+            "dosage",
+            "instructions",
+            "frequency_per_day",
+            "recommended_times_minutes",
+        ],
         "additionalProperties": False,
     }
 
@@ -787,17 +858,126 @@ async def scan_medication(payload: ScanMedicationIn):
         data = r.json()
         content = _openai_response_text(data)
         parsed = _try_parse_json_object(content) or {}
+        freq = parsed.get("frequency_per_day")
+        if not isinstance(freq, int):
+            try:
+                freq = int(freq)
+            except Exception:
+                freq = 0
+
+        rec_times = parsed.get("recommended_times_minutes") or []
+        cleaned_times = []
+        if isinstance(rec_times, list):
+            for t in rec_times:
+                try:
+                    m = int(t)
+                except Exception:
+                    continue
+                if 0 <= m < 24 * 60:
+                    cleaned_times.append(m)
+        cleaned_times = sorted(list(dict.fromkeys(cleaned_times)))
+
+        name_out = str(parsed.get("name") or "").strip()
+        dosage_out = str(parsed.get("dosage") or "").strip()
+        instr_out = str(parsed.get("instructions") or "").strip()
+
+        # Normalization: remove common cross-contamination between fields.
+        strength_unit_re = re.compile(r"\b\d+(?:\.\d+)?\s*(mg|mcg|g|ml|units?)\b", flags=re.I)
+        take_words_re = re.compile(r"\b(take|by mouth|mouth|swallow|liquid)\b", flags=re.I)
+
+        # If the model accidentally included strength in the name line, remove it.
+        if name_out:
+            name_out = strength_unit_re.sub("", name_out).strip(" -,:;")
+
+        # If dosage includes direction words, strip down to the first strength+unit (and optional form token).
+        if dosage_out and take_words_re.search(dosage_out):
+            m = strength_unit_re.search(dosage_out)
+            if m:
+                dosage_out = m.group(0).strip()
+
+        # If instructions includes strength (e.g. "Take 10 mL by mouth ..."), remove the strength portion.
+        if instr_out:
+            instr_out = strength_unit_re.sub("", instr_out).replace("  ", " ").strip(" -,:;")
+
+        # Guardrail: never return "see label/bottle" placeholders; prefer empty so client fallback can fill.
+        _placeholder_re = re.compile(
+            r"\b("
+            r"see\s*(the\s*)?(label|bottle)|refer\s*to\s*(the\s*)?label|"
+            r"as\s*directed|take\s*as\s*directed|"
+            r"see\s*instructions|see\s*label\s*for\s*instructions"
+            r")\b",
+            flags=re.I,
+        )
+        if dosage_out and _placeholder_re.search(dosage_out):
+            dosage_out = ""
+        if instr_out and _placeholder_re.search(instr_out):
+            instr_out = ""
+
+        # Prefer the concentration/strength line for dosage when present (e.g. "2-30-10 mg/5 mL").
+        concentration_guess = str(hints.get("concentration_guess") or "").strip()
+        if concentration_guess:
+            dosage_out = concentration_guess
+
+        # Guardrail: if we detected a dash-name candidate line and the model returned only a substring,
+        # prefer the entire original line (user requirement).
+        dash_line = str(hints.get("dash_name_candidate") or "").strip()
+        if dash_line and name_out and name_out.lower() in dash_line.lower() and len(dash_line) > len(name_out):
+            name_out = dash_line
+
+        # Guardrail: dosage should usually include a numeric strength + unit (mg/mcg/g/mL/units).
+        # If the model returned non-empty dosage but no unit/strength, prefer OCR-derived strength if present.
+        if dosage_out and not re.search(r"\b\d+(?:\.\d+)?\s*(mg|mcg|g|ml|units?)\b", dosage_out, flags=re.I):
+            strength_guess = str(hints.get("dosage_guess") or "").strip()
+            if strength_guess:
+                dosage_out = strength_guess
+
+        # Guardrail: if the label clearly contains mL but the model picked mg, prefer the OCR strength_guess.
+        if dosage_out and re.search(r"\bmg\b", dosage_out, flags=re.I) and re.search(r"\bml\b", text, flags=re.I):
+            strength_guess = str(hints.get("dosage_guess") or "").strip()
+            if strength_guess and re.search(r"\bml\b", strength_guess, flags=re.I):
+                dosage_out = strength_guess
+
+        # Guardrail: instructions usually shouldn't be mostly numeric; if we have a cleaner OCR hint, prefer it.
+        if instr_out and re.search(r"\d", instr_out):
+            instr_guess = str(hints.get("instructions_guess") or "").strip()
+            if instr_guess and not re.search(r"\d", instr_guess):
+                instr_out = instr_guess
+
+        # Guardrail: if we detected an "every X hours" interval and instructions don't mention it, add it.
+        try:
+            interval_hours = int(hints.get("interval_hours") or 0)
+        except Exception:
+            interval_hours = 0
+        if interval_hours > 0 and (not re.search(r"\bevery\b", instr_out, flags=re.I)):
+            suffix = f"every {interval_hours} hours"
+            instr_out = (instr_out.strip() + (" " if instr_out.strip() else "") + suffix).strip()
+
+        # If interval-based and frequency_per_day looks unknown, derive it.
+        if interval_hours > 0 and int(freq or 0) == 0:
+            try:
+                freq = max(1, min(12, int(round(24 / interval_hours))))
+            except Exception:
+                freq = 0
+
         return ScanMedicationOut(
-            name=str(parsed.get("name") or "").strip(),
-            dosage=str(parsed.get("dosage") or "").strip(),
-            instructions=str(parsed.get("instructions") or "").strip(),
+            name=name_out,
+            dosage=dosage_out,
+            instructions=instr_out,
+            frequency_per_day=max(0, int(freq)),
+            recommended_times_minutes=cleaned_times,
         )
     except Exception:
         log.exception("scan_medication: OpenAI call failed; falling back")
         name = text.splitlines()[0][:40] if text else "Medication"
-        dosage = "See label" if "mg" in text.lower() else "1 pill"
-        instructions = "Take as directed."
-        return ScanMedicationOut(name=name, dosage=dosage, instructions=instructions)
+        dosage = ""
+        instructions = ""
+        return ScanMedicationOut(
+            name=name,
+            dosage=dosage,
+            instructions=instructions,
+            frequency_per_day=0,
+            recommended_times_minutes=[],
+        )
 
 
 def _ocr_hints(text: str) -> dict:
@@ -807,7 +987,15 @@ def _ocr_hints(text: str) -> dict:
     """
     t = (text or "").strip()
     if not t:
-        return {"name_guess": "", "dosage_guess": "", "instructions_guess": ""}
+        return {
+            "name_guess": "",
+            "dash_name_candidate": "",
+            "dosage_guess": "",
+            "instructions_guess": "",
+            "dose_amount_guess": "",
+            "concentration_guess": "",
+            "interval_hours": 0,
+        }
 
     lines = [ln.strip() for ln in re.split(r"\r?\n", t) if ln.strip()]
     lower_lines = [ln.lower() for ln in lines]
@@ -834,6 +1022,42 @@ def _ocr_hints(text: str) -> dict:
             instructions_guess = ln
             break
 
+    # Dose amount guess: often "Take 10 mL ..." on liquid labels.
+    dose_amount_guess = ""
+    m_dose = re.search(r"\btake\s+(\d+(?:\.\d+)?)\s*(ml|mL)\b", t, flags=re.I)
+    if m_dose:
+        dose_amount_guess = f"{m_dose.group(1)} mL"
+
+    # Concentration/strength line guess, e.g. "2-30-10 MG/5ML" or "10 mg/5 mL".
+    concentration_guess = ""
+    m_conc = re.search(
+        r"\b(\d+(?:-\d+){1,3})\s*(mg|mcg|g)\s*/\s*(\d+(?:\.\d+)?)\s*(ml|mL)\b",
+        t,
+        flags=re.I,
+    )
+    if m_conc:
+        # Preserve the original matched string with normalized spacing/case.
+        concentration_guess = f"{m_conc.group(1)} mg/{m_conc.group(3)} mL"
+
+    # Interval hint: capture "every X hours" patterns for scheduling.
+    interval_hours = 0
+    m_int = re.search(r"\bevery\s+(\d{1,2})\s*(hours?|hrs?|hr|h)\b", t, flags=re.I)
+    if m_int:
+        try:
+            interval_hours = int(m_int.group(1))
+        except Exception:
+            interval_hours = 0
+
+    # Dash-separated uppercase chemical/drug string candidate.
+    # Keep the ENTIRE line (not just the token), per app UX needs.
+    dash_name_candidate = ""
+    # Allow mixed case because OCR often returns e.g. "bromphen-PSE-DM".
+    dash_re = re.compile(r"\b[A-Za-z0-9]{2,}(?:-[A-Za-z0-9]{1,})+\b")
+    for ln in lines:
+        if dash_re.search(ln):
+            dash_name_candidate = ln
+            break
+
     # Name guess: prefer first short-ish non-junk line that isn't obviously demographic/pharmacy.
     name_guess = ""
     junk_markers = ("patient", "address", "rx", "refill", "pharmacy", "doctor", "dr.", "qty", "date", "phone", "take", "sig", "directions")
@@ -848,8 +1072,12 @@ def _ocr_hints(text: str) -> dict:
 
     return {
         "name_guess": name_guess,
+        "dash_name_candidate": dash_name_candidate,
         "dosage_guess": dosage_guess,
         "instructions_guess": instructions_guess,
+        "dose_amount_guess": dose_amount_guess,
+        "concentration_guess": concentration_guess,
+        "interval_hours": interval_hours,
     }
 
 

@@ -314,6 +314,10 @@ class NotificationService {
         priority: Priority.high,
         fullScreenIntent: isFullScreen,
         category: AndroidNotificationCategory.alarm,
+        playSound: true,
+        enableVibration: true,
+        // ~1s buzz total, in short pulses.
+        vibrationPattern: Int64List.fromList(<int>[0, 250, 150, 250, 150, 200]),
         actions: const <AndroidNotificationAction>[
           AndroidNotificationAction(actionTaken, 'I took it'),
           AndroidNotificationAction(actionSnooze10, 'Snooze 10 min'),
@@ -340,16 +344,16 @@ class NotificationService {
     return raw.abs() % 2147483647;
   }
 
-  /// Escalation protocol (local/on-device):
-  /// - stage 0 at scheduled time
-  /// - stage 1 at +5 minutes
-  /// - stage 2 at +15 minutes
+  /// Reminder protocol (local/on-device):
+  /// - stage 0 at -5 minutes
+  /// - stage 1 at scheduled time
+  /// - stage 2 at +5 minutes (if not taken, user can cancel by taking)
+  /// - stage 3 at +10 minutes (if not taken)
   ///
   /// These are one-shot notifications for the next occurrence of [time] (today or tomorrow).
   Future<void> scheduleEscalatingDoseReminder({
     required String doseId,
     required String medicationName,
-    required String dosageText,
     required TimeOfDay time,
   }) async {
     final now = tz.TZDateTime.now(tz.local);
@@ -366,13 +370,21 @@ class NotificationService {
     }
 
     const offsets = <Duration>[
+      Duration(minutes: -5),
       Duration(minutes: 0),
       Duration(minutes: 5),
-      Duration(minutes: 15),
+      Duration(minutes: 10),
     ];
 
+    // Schedule each stage independently. If e.g. stage 0 (T-5m) is already in the past
+    // when this runs, zonedSchedule can fail or be a no-op — and on some platforms a thrown
+    // error would have aborted the whole loop, so the main reminder (stage 1) never got
+    // scheduled. Skip past times and don’t let one stage block the rest.
     for (int stage = 0; stage < offsets.length; stage++) {
       final when = scheduled.add(offsets[stage]);
+      if (!when.isAfter(now)) {
+        continue;
+      }
       final payload = DoseReminderPayload(
         doseId: doseId,
         medicationName: medicationName,
@@ -380,17 +392,29 @@ class NotificationService {
         stage: stage,
       ).encode();
 
-      await _plugin.zonedSchedule(
-        _doseNotificationId(doseId: doseId, stage: stage),
-        stage == 0 ? medicationName : 'Missed dose: $medicationName',
-        dosageText.isEmpty
-            ? 'Time to take your dose. Tap “I took it” when done.'
-            : 'Time to take $dosageText. Tap “I took it” when done.',
-        when,
-        _detailsForStage(stage: stage),
-        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-        payload: payload,
-      );
+      final body = switch (stage) {
+        0 => 'Be ready to take your pills!',
+        1 => 'pill time!',
+        2 => 'Your pal is getting sad, make sure you take your pill!',
+        _ => 'Your pal is getting super sad, take your pill before it is too late',
+      };
+
+      try {
+        await _plugin.zonedSchedule(
+          _doseNotificationId(doseId: doseId, stage: stage),
+          medicationName,
+          body,
+          when,
+          _detailsForStage(stage: stage),
+          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+          payload: payload,
+        );
+      } catch (e) {
+        assert(() {
+          debugPrint('scheduleEscalatingDoseReminder stage $stage: $e');
+          return true;
+        }());
+      }
     }
   }
 
@@ -421,6 +445,21 @@ class NotificationService {
     );
   }
 
+  Future<void> showCaregiverNudgeNow({
+    required String title,
+    required String body,
+    String? payload,
+  }) async {
+    await _plugin.show(
+      // Dedicated ID range; overwrite is fine for nudges.
+      910000,
+      title,
+      body,
+      _detailsForStage(stage: 0),
+      payload: payload,
+    );
+  }
+
   Future<void> writeDoseAcknowledgementToFirestore({
     required String elderlyUsername,
     required String doseId,
@@ -441,7 +480,7 @@ class NotificationService {
   }
 
   Future<void> cancelEscalationSeries({required String doseId}) async {
-    for (int stage = 0; stage < 3; stage++) {
+    for (int stage = 0; stage < 4; stage++) {
       await _plugin.cancel(_doseNotificationId(doseId: doseId, stage: stage));
     }
   }

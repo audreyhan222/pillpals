@@ -41,6 +41,10 @@ class TamagotchiDailyState {
     required this.expectedDoseCount,
     required this.events,
     required this.expression,
+    required this.happiness,
+    required this.happinessOffset,
+    required this.penalized5m,
+    required this.penalized10m,
     this.sadUntil,
   });
 
@@ -48,6 +52,14 @@ class TamagotchiDailyState {
   final int expectedDoseCount;
   final Map<String, DoseEvent> events;
   final PalExpression expression;
+  /// 0..1 current happiness value.
+  final double happiness;
+  /// Manual +/- adjustments that persist through the day (missed reminders, etc).
+  final double happinessOffset;
+  /// Tracks which doseIds already applied the +5m penalty.
+  final Set<String> penalized5m;
+  /// Tracks which doseIds already applied the +10m penalty.
+  final Set<String> penalized10m;
   final DateTime? sadUntil;
 
   factory TamagotchiDailyState.initial({
@@ -59,6 +71,11 @@ class TamagotchiDailyState {
       expectedDoseCount: expectedDoseCount,
       events: const {},
       expression: PalExpression.neutral,
+      // Aligned with [_baseHappiness01] at local midnight + engine thresholds (neutral band).
+      happiness: 0.55,
+      happinessOffset: 0.0,
+      penalized5m: const <String>{},
+      penalized10m: const <String>{},
     );
   }
 
@@ -67,6 +84,10 @@ class TamagotchiDailyState {
     int? expectedDoseCount,
     Map<String, DoseEvent>? events,
     PalExpression? expression,
+    double? happiness,
+    double? happinessOffset,
+    Set<String>? penalized5m,
+    Set<String>? penalized10m,
     DateTime? sadUntil,
     bool clearSadUntil = false,
   }) {
@@ -75,6 +96,10 @@ class TamagotchiDailyState {
       expectedDoseCount: expectedDoseCount ?? this.expectedDoseCount,
       events: events ?? this.events,
       expression: expression ?? this.expression,
+      happiness: happiness ?? this.happiness,
+      happinessOffset: happinessOffset ?? this.happinessOffset,
+      penalized5m: penalized5m ?? this.penalized5m,
+      penalized10m: penalized10m ?? this.penalized10m,
       sadUntil: clearSadUntil ? null : (sadUntil ?? this.sadUntil),
     );
   }

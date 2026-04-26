@@ -39,6 +39,13 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_model: str = "gpt-4.1-mini"
 
+    # Debug/testing: force scan-medication name output (empty = disabled).
+    scan_medication_force_name: str = ""
+    # Debug/testing: force scan-medication dosage output (empty = disabled).
+    scan_medication_force_dosage: str = ""
+    # Debug/testing: force scan-medication instructions output (empty = disabled).
+    scan_medication_force_instructions: str = ""
+
     _resolved_service_account_path: str | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")

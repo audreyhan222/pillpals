@@ -55,7 +55,7 @@ class _LandingPageState extends State<LandingPage>
 
     _logoAlignment = AlignmentTween(
       begin: Alignment.center,
-      end: const Alignment(0, -0.45),
+      end: const Alignment(0, -0.62),
     ).animate(
       CurvedAnimation(parent: _logoController, curve: Curves.easeInOutCubic),
     );
@@ -280,10 +280,132 @@ class _LandingPageState extends State<LandingPage>
                   ),
                 ],
               ),
-              child: const Icon(
-                Icons.favorite_rounded,
-                color: Colors.white,
-                size: 54,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  // Pill buddy
+                  Container(
+                    width: 70,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(999),
+                      color: Colors.white.withValues(alpha: 0.92),
+                      border: Border.all(
+                        color: const Color(0xFF1E2D4A).withValues(alpha: 0.12),
+                        width: 1.2,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.08),
+                          blurRadius: 14,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: Stack(
+                      children: [
+                        // Capsule split
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Container(
+                            width: 35,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFC2DEFF).withValues(alpha: 0.95),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                          ),
+                        ),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: Container(
+                            width: 35,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFFE07A).withValues(alpha: 0.95),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                          ),
+                        ),
+                        // Split seam
+                        Align(
+                          alignment: Alignment.center,
+                          child: Container(
+                            width: 2,
+                            height: 40,
+                            color: const Color(0xFF1E2D4A).withValues(alpha: 0.08),
+                          ),
+                        ),
+                        // Face
+                        Align(
+                          alignment: const Alignment(0, 0.2),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 6,
+                                height: 6,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF1E2D4A).withValues(alpha: 0.85),
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Container(
+                                width: 6,
+                                height: 6,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF1E2D4A).withValues(alpha: 0.85),
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Align(
+                          alignment: const Alignment(0, 0.55),
+                          child: Container(
+                            width: 14,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              border: Border(
+                                bottom: BorderSide(
+                                  color: const Color(0xFF1E2D4A).withValues(alpha: 0.55),
+                                  width: 2,
+                                ),
+                              ),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Heart badge
+                  Positioned(
+                    right: 18,
+                    top: 22,
+                    child: Container(
+                      width: 26,
+                      height: 26,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFF5A7A).withValues(alpha: 0.95),
+                        borderRadius: BorderRadius.circular(999),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFFFF5A7A).withValues(alpha: 0.35),
+                            blurRadius: 14,
+                            offset: const Offset(0, 6),
+                          ),
+                        ],
+                      ),
+                      child: const Icon(
+                        Icons.favorite_rounded,
+                        size: 16,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],

@@ -86,7 +86,7 @@ class _CaregiverElderlySelectionScreenState
     try {
       final addedId = await showDialog<String>(
         context: context,
-        builder: (context) {
+        builder: (dialogContext) {
           return AlertDialog(
             title: const Text('Link an elderly user'),
             content: TextField(
@@ -97,15 +97,16 @@ class _CaregiverElderlySelectionScreenState
                 labelText: 'Connect code',
                 hintText: 'e.g. ABCD2345',
               ),
-              onSubmitted: (_) => Navigator.of(context).pop(controller.text),
+              onSubmitted: (_) => Navigator.of(dialogContext).pop(controller.text),
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.of(context).pop(),
+                // Empty string = cancelled (same pattern as pal rename; avoids null/edge issues).
+                onPressed: () => Navigator.of(dialogContext).pop(''),
                 child: const Text('Cancel'),
               ),
               FilledButton(
-                onPressed: () => Navigator.of(context).pop(controller.text),
+                onPressed: () => Navigator.of(dialogContext).pop(controller.text),
                 child: const Text('Add'),
               ),
             ],
@@ -113,8 +114,9 @@ class _CaregiverElderlySelectionScreenState
         },
       );
 
-      final id = (addedId ?? '').trim();
       if (!mounted) return;
+      final id = (addedId ?? '').trim();
+      // Cancel: no lookup / no SnackBar errors.
       if (id.isEmpty) return;
 
       final code = id.toUpperCase();
@@ -332,7 +334,9 @@ class _CaregiverElderlySelectionScreenState
                                   person: p,
                                   onTap: () {
                                     HapticFeedback.lightImpact();
-                                    context.push('/caregiver/elderly/${p.id}');
+                                    final target =
+                                        p.elderlyUsername.isNotEmpty ? p.elderlyUsername : p.id;
+                                    context.push('/caregiver/elderly/$target');
                                   },
                                 );
                               },

@@ -9,3 +9,4 @@ pydantic[email]
 python-multipart
 firebase-admin
 httpx
+python-dotenv

@@ -202,7 +202,7 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen>
                             ),
                             const SizedBox(height: 16),
                             const Text(
-                              'Elderly log in',
+                              'User log in',
                               style: TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.w800,

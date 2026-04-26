@@ -69,7 +69,6 @@ class CaregiverReminderSyncService {
       for (final doc in snap.docs) {
         final data = doc.data();
         final name = (data['name'] as String?)?.trim() ?? '';
-        final dosage = (data['dosageAmount'] as String?)?.trim() ?? '';
         final times = (data['timesMinutes'] as List?)?.cast<dynamic>() ?? const [];
         if (name.isEmpty) continue;
         for (final t in times) {
@@ -92,7 +91,6 @@ class CaregiverReminderSyncService {
           await NotificationService.instance.scheduleEscalatingDoseReminder(
             doseId: doseId,
             medicationName: '$name ($elderlyUsername)',
-            dosageText: dosage,
             time: time,
           );
         }

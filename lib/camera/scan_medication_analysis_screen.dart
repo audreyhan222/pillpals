@@ -1,15 +1,15 @@
 import 'dart:io';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 
 import '../firestore/medication_repository.dart';
+import '../firestore/ocr_label_correction_repository.dart';
 import '../notifications/notification_service.dart';
-import '../state/api_config_store.dart';
-import '../state/session_store.dart';
 import 'pill_details.dart';
 import 'pill_details_parser.dart';
-import 'scan_medication_service.dart';
 
 class ScanMedicationInput {
   const ScanMedicationInput({
@@ -31,11 +31,124 @@ class ScanMedicationAnalysisScreen extends StatefulWidget {
 }
 
 class _ScanMedicationAnalysisScreenState extends State<ScanMedicationAnalysisScreen> {
-  late PillDetails _local;
-  PillDetails? _ai;
-  bool _loading = true;
-  String? _error;
+  final _nameC = TextEditingController();
+  final _dosageC = TextEditingController();
+  final _instructionsC = TextEditingController();
+
+  late PillDetails _parsed;
+  bool _ready = false;
   bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _parsed = PillDetailsParser.parse(widget.input.recognizedText);
+    _parsed = _parsed.copyWith(rawText: widget.input.recognizedText);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadSavedCorrections());
+  }
+
+  Future<void> _loadSavedCorrections() async {
+    if (!mounted) return;
+    try {
+      final repo = OcrLabelCorrectionRepository();
+      final c = await repo.getForRawOcr(context, widget.input.recognizedText);
+      if (c != null) {
+        _parsed = _parsed.copyWith(
+          name: c.correctName.isNotEmpty ? c.correctName : _parsed.name,
+          dosage: c.correctDosage.isNotEmpty ? c.correctDosage : _parsed.dosage,
+          instructions:
+              c.correctInstructions.isNotEmpty ? c.correctInstructions : _parsed.instructions,
+        );
+      }
+    } catch (_) {
+      // Non-fatal: show parser-only values.
+    }
+    if (!mounted) return;
+    setState(() {
+      _nameC.text = _parsed.name;
+      _dosageC.text = _parsed.dosage;
+      _instructionsC.text = _parsed.instructions;
+      _ready = true;
+    });
+  }
+
+  @override
+  void dispose() {
+    _nameC.dispose();
+    _dosageC.dispose();
+    _instructionsC.dispose();
+    super.dispose();
+  }
+
+  Future<TimeOfDay?> _pickStartTime() async {
+    TimeOfDay selected = const TimeOfDay(hour: 9, minute: 0);
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      useSafeArea: true,
+      builder: (context) {
+        return SizedBox(
+          height: 340,
+          child: Column(
+            children: [
+              const SizedBox(height: 6),
+              const Text(
+                'Pick a start time',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: CupertinoDatePicker(
+                  mode: CupertinoDatePickerMode.time,
+                  use24hFormat: false,
+                  initialDateTime: DateTime(2020, 1, 1, selected.hour, selected.minute),
+                  onDateTimeChanged: (dt) {
+                    selected = TimeOfDay(hour: dt.hour, minute: dt.minute);
+                  },
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextButton(
+                        onPressed: () => Navigator.of(context).pop(false),
+                        child: const Text('Cancel'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () => Navigator.of(context).pop(true),
+                        child: const Text('Use'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (ok != true) return null;
+    return selected;
+  }
+
+  List<TimeOfDay> _timesFromStartAndInterval({
+    required TimeOfDay start,
+    required int intervalMinutes,
+  }) {
+    if (intervalMinutes <= 0) return [start];
+    final out = <TimeOfDay>[];
+    int minutes = start.hour * 60 + start.minute;
+    while (minutes < 24 * 60) {
+      out.add(TimeOfDay(hour: minutes ~/ 60, minute: minutes % 60));
+      minutes += intervalMinutes;
+    }
+    return out;
+  }
 
   Future<void> _showPendingReminders() async {
     try {
@@ -104,66 +217,30 @@ class _ScanMedicationAnalysisScreenState extends State<ScanMedicationAnalysisScr
   }
 
   @override
-  void initState() {
-    super.initState();
-    _local = PillDetailsParser.parse(widget.input.recognizedText);
-    _runAi();
-  }
-
-  Future<void> _runAi() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-      _ai = null;
-    });
-
-    try {
-      final token = context.read<SessionStore>().token;
-      final baseUrl = context.read<ApiConfigStore>().baseUrl;
-      final service = ScanMedicationService(token: token, baseUrl: baseUrl);
-      final res = await service.analyzeText(text: widget.input.recognizedText);
-
-      final merged = _local.copyWith(
-        name: res.name.isNotEmpty ? res.name : _local.name,
-        dosage: res.dosage.isNotEmpty ? res.dosage : _local.dosage,
-        instructions: res.instructions.isNotEmpty ? res.instructions : _local.instructions,
-      );
-
-      if (!mounted) return;
-      setState(() {
-        _ai = merged;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = 'AI analysis failed (showing OCR results instead): $e';
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _loading = false;
-        });
-      }
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final details = _ai ?? _local;
+    if (!_ready) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('OCR Results')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('AI Analysis'),
+        title: const Text('OCR Results'),
         actions: [
+          IconButton(
+            tooltip: 'Saved label text library',
+            onPressed: () {
+              HapticFeedback.lightImpact();
+              context.push('/ocr/labels');
+            },
+            icon: const Icon(Icons.menu_book_outlined),
+          ),
           IconButton(
             tooltip: 'Pending reminders (debug)',
             onPressed: _showPendingReminders,
             icon: const Icon(Icons.notifications_active_outlined),
-          ),
-          IconButton(
-            tooltip: 'Re-run analysis',
-            onPressed: _loading ? null : _runAi,
-            icon: const Icon(Icons.refresh_rounded),
           ),
         ],
       ),
@@ -179,40 +256,31 @@ class _ScanMedicationAnalysisScreenState extends State<ScanMedicationAnalysisScr
                 fit: BoxFit.cover,
               ),
             ),
-            const SizedBox(height: 14),
-            if (_loading)
-              const ListTile(
-                leading: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-                title: Text('Analyzing label…'),
-                subtitle: Text('Extracting dosage + instructions'),
+            const SizedBox(height: 8),
+            Text(
+              'One OCR pipeline, then you fix any mistakes. The exact text and your edits are saved for next time this label is scanned.',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Colors.black.withValues(alpha: 0.55),
+                height: 1.25,
               ),
-            if (_error != null) ...[
-              Text(
-                _error!,
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.error,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 12),
-            ],
-            _ResultCard(
-              title: 'Medication name',
-              value: details.name.isEmpty ? '—' : details.name,
+            ),
+            const SizedBox(height: 12),
+            _FieldCard(
+              label: 'Medication name',
+              controller: _nameC,
             ),
             const SizedBox(height: 10),
-            _ResultCard(
-              title: 'Dosage',
-              value: details.dosage.isEmpty ? '—' : details.dosage,
+            _FieldCard(
+              label: 'Dosage',
+              controller: _dosageC,
             ),
             const SizedBox(height: 10),
-            _ResultCard(
-              title: 'Instructions',
-              value: details.instructions.isEmpty ? '—' : details.instructions,
+            _FieldCard(
+              label: 'Instructions',
+              controller: _instructionsC,
+              maxLines: 4,
             ),
             const SizedBox(height: 14),
             FilledButton(
@@ -223,24 +291,59 @@ class _ScanMedicationAnalysisScreenState extends State<ScanMedicationAnalysisScr
                         _saving = true;
                       });
                       try {
+                        final start = await _pickStartTime();
+                        if (start == null) return;
+                        if (!context.mounted) return;
+
+                        final interval = _parsed.intervalMinutes;
+                        final timesToSchedule = interval > 0
+                            ? _timesFromStartAndInterval(
+                                start: start,
+                                intervalMinutes: interval,
+                              )
+                            : <TimeOfDay>[start];
+
+                        final detailsToSave = _parsed.copyWith(
+                          name: _nameC.text.trim(),
+                          dosage: _dosageC.text.trim(),
+                          instructions: _instructionsC.text.trim(),
+                          times: timesToSchedule,
+                          rawText: widget.input.recognizedText,
+                        );
+
+                        try {
+                          await OcrLabelCorrectionRepository().upsertCorrection(
+                            context: context,
+                            rawOcrText: widget.input.recognizedText,
+                            correctName: detailsToSave.name,
+                            correctDosage: detailsToSave.dosage,
+                            correctInstructions: detailsToSave.instructions,
+                          );
+                        } catch (e) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Could not save label library: $e')),
+                            );
+                          }
+                        }
+
+                        if (!context.mounted) return;
                         final repo = MedicationRepository();
                         await repo.addMedicationFromScanForSession(
                           context: context,
-                          details: details,
+                          details: detailsToSave,
                         );
 
-                        // Schedule one daily reminder per time.
-                        for (int i = 0; i < details.times.length; i++) {
-                          final t = details.times[i];
-                          final name = details.name.isEmpty ? 'Medication' : details.name;
-                          final id =
-                              (name.hashCode ^ (t.hour * 60 + t.minute)).abs() % 2147483647;
-                          await NotificationService.instance.scheduleDailyDoseReminder(
-                            id: id,
+                        final name =
+                            detailsToSave.name.isEmpty ? 'Medication' : detailsToSave.name;
+                        for (int i = 0; i < detailsToSave.times.length; i++) {
+                          final t = detailsToSave.times[i];
+                          final doseId =
+                              '${name.toLowerCase()}_${t.hour.toString().padLeft(2, '0')}${t.minute.toString().padLeft(2, '0')}';
+                          await NotificationService.instance.scheduleEscalatingDoseReminder(
+                            doseId: doseId,
+                            medicationName: name,
                             time: t,
-                            title: name,
-                            body: 'pill time!',
-                            payload: name,
                           );
                         }
 
@@ -261,7 +364,7 @@ class _ScanMedicationAnalysisScreenState extends State<ScanMedicationAnalysisScr
             ),
             const SizedBox(height: 14),
             ExpansionTile(
-              title: const Text('OCR text (debug)'),
+              title: const Text('OCR text (raw)'),
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -280,26 +383,31 @@ class _ScanMedicationAnalysisScreenState extends State<ScanMedicationAnalysisScr
   }
 }
 
-class _ResultCard extends StatelessWidget {
-  const _ResultCard({required this.title, required this.value});
+class _FieldCard extends StatelessWidget {
+  const _FieldCard({
+    required this.label,
+    required this.controller,
+    this.maxLines = 2,
+  });
 
-  final String title;
-  final String value;
+  final String label;
+  final TextEditingController controller;
+  final int maxLines;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: Colors.black12),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            title,
+            label,
             style: TextStyle(
               color: Colors.black.withValues(alpha: 0.6),
               fontWeight: FontWeight.w800,
@@ -308,12 +416,19 @@ class _ResultCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 6),
-          Text(
-            value,
+          TextField(
+            controller: controller,
+            maxLines: maxLines,
+            minLines: 1,
             style: const TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w800,
               height: 1.2,
+            ),
+            decoration: const InputDecoration(
+              isDense: true,
+              border: InputBorder.none,
+              contentPadding: EdgeInsets.zero,
             ),
           ),
         ],
@@ -321,4 +436,3 @@ class _ResultCard extends StatelessWidget {
     );
   }
 }
-

@@ -15,11 +15,12 @@ import 'screens/role/role_select_screen.dart';
 import 'screens/reminder/reminder_screen.dart';
 import 'screens/shell/home_shell.dart';
 import 'screens/caregiver/caregiver_elderly_selection_screen.dart';
-import 'screens/caregiver/caregiver_elderly_detail_screen.dart';
+import 'screens/caregiver/caregiver_patient_detail_screen.dart';
 import 'state/session_store.dart';
 import 'camera/pill_bottle_camera_page.dart';
 import 'camera/scan_medication_analysis_screen.dart';
 import 'pals/pals_gallery_page.dart';
+import 'screens/ocr/ocr_label_library_screen.dart';
 
 final rootNavigatorKey = GlobalKey<NavigatorState>();
 
@@ -44,6 +45,7 @@ final appRouter = GoRouter(
           state.matchedLocation == '/dashboard/right' ||
           state.matchedLocation == '/scan' ||
           state.matchedLocation == '/scan/analysis' ||
+          state.matchedLocation == '/ocr/labels' ||
           state.matchedLocation.startsWith('/caregiver');
 
       if (!session.isAuthed && !isPublic) {
@@ -125,6 +127,10 @@ final appRouter = GoRouter(
         },
       ),
       GoRoute(
+        path: '/ocr/labels',
+        builder: (context, state) => const OcrLabelLibraryScreen(),
+      ),
+      GoRoute(
         path: '/pals',
         builder: (context, state) => const PalsGalleryPage(),
       ),
@@ -136,7 +142,7 @@ final appRouter = GoRouter(
             path: 'elderly/:id',
             builder: (context, state) {
               final id = state.pathParameters['id'] ?? '';
-              return CaregiverElderlyDetailScreen(elderlyId: id);
+              return CaregiverPatientDetailScreen(elderlyUsername: id);
             },
           ),
         ],

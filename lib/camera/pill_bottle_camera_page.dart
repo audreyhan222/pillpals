@@ -28,6 +28,7 @@ class _PillBottleCameraPageState extends State<PillBottleCameraPage> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _dosageController = TextEditingController();
   final TextEditingController _instructionsController = TextEditingController();
+  final TextEditingController _frequencyController = TextEditingController();
 
   File? _capturedImage;
   String _recognizedText = '';
@@ -41,6 +42,7 @@ class _PillBottleCameraPageState extends State<PillBottleCameraPage> {
     _nameController.dispose();
     _dosageController.dispose();
     _instructionsController.dispose();
+    _frequencyController.dispose();
     super.dispose();
   }
 
@@ -74,12 +76,15 @@ class _PillBottleCameraPageState extends State<PillBottleCameraPage> {
       final extractedText = await _recognizer.extractTextFromFile(file);
 
       if (!mounted) return;
+      final parsed = PillDetailsParser.parse(
+        extractedText.isEmpty ? '' : extractedText,
+      );
       setState(() {
         _capturedImage = file;
         _recognizedText = extractedText.isEmpty
             ? 'No text found. Try a clearer image with better lighting.'
             : extractedText;
-        final parsed = PillDetailsParser.parse(_recognizedText);
+        // Fast local parse so the UI fills instantly even if AI is slow/fails.
         _nameController.text = parsed.name;
         _dosageController.text = parsed.dosage;
         _instructionsController.text = parsed.instructions;
@@ -88,7 +93,7 @@ class _PillBottleCameraPageState extends State<PillBottleCameraPage> {
           ..addAll(parsed.times);
       });
 
-      // Immediately hand off to the AI analysis screen (it falls back to local parsing if AI fails).
+      // Hand off to the analysis screen.
       if (!mounted) return;
       context.push(
         '/scan/analysis',
@@ -215,6 +220,7 @@ class _PillBottleCameraPageState extends State<PillBottleCameraPage> {
     final manualTimes = <TimeOfDay>[
       ..._times,
     ]..sort((a, b) => (a.hour * 60 + a.minute).compareTo(b.hour * 60 + b.minute));
+    int intervalHours = 0; // 0 => daily
 
     try {
       final saved = await showDialog<bool>(
@@ -389,6 +395,29 @@ class _PillBottleCameraPageState extends State<PillBottleCameraPage> {
                             .toList(),
                       ),
                     ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Interval between doses',
+                          style: TextStyle(fontWeight: FontWeight.w900),
+                        ),
+                      ),
+                      Text(intervalHours == 0 ? 'Daily' : '${intervalHours}h'),
+                    ],
+                  ),
+                  Slider(
+                    value: intervalHours.toDouble(),
+                    min: 0,
+                    max: 12,
+                    divisions: 12,
+                    label: intervalHours == 0 ? 'Daily' : '${intervalHours}h',
+                    onChanged: (v) {
+                      intervalHours = v.round();
+                      (context as Element).markNeedsBuild();
+                    },
+                  ),
                 ],
               ),
             ),
@@ -413,29 +442,25 @@ class _PillBottleCameraPageState extends State<PillBottleCameraPage> {
       final times = manualTimes.toList()
         ..sort((a, b) => (a.hour * 60 + a.minute).compareTo(b.hour * 60 + b.minute));
       final timesMinutes = times.map((t) => t.hour * 60 + t.minute).toList();
-      final schedule = times.isEmpty
-          ? ''
-          : 'Daily at ${times.map((t) => t.format(context)).join(', ')}';
       await ElderlyMedicationCatalogRepository().upsertMedication(
         elderlyUsername: username,
         name: trimmedName,
         totalLeft: left,
         dosageAmount: dosageAmount.text.trim(),
-        dosageSchedule: schedule,
         timesMinutes: timesMinutes,
         instructions: instructions.text.trim(),
+        intervalMinutes: intervalHours == 0 ? 24 * 60 : intervalHours * 60,
       );
 
       // Schedule a daily local notification at each chosen time.
       for (final t in times) {
         final medName = trimmedName.isEmpty ? 'Medication' : trimmedName;
-        final id = (medName.hashCode ^ (t.hour * 60 + t.minute)).abs() % 2147483647;
-        await NotificationService.instance.scheduleDailyDoseReminder(
-          id: id,
+        final doseId =
+            '${medName.toLowerCase()}_${t.hour.toString().padLeft(2, '0')}${t.minute.toString().padLeft(2, '0')}';
+        await NotificationService.instance.scheduleEscalatingDoseReminder(
+          doseId: doseId,
+          medicationName: medName,
           time: t,
-          title: medName,
-          body: 'pill time!',
-          payload: medName,
         );
       }
 
@@ -558,7 +583,7 @@ class _PillBottleCameraPageState extends State<PillBottleCameraPage> {
                           ),
                           const SizedBox(height: 10),
                           FilledButton.tonalIcon(
-                            onPressed: _isProcessing ? null : _promptManualMedicationAdd,
+                            onPressed: _isProcessing ? null : () => _promptManualMedicationAdd(),
                             icon: const Icon(Icons.edit_note_rounded),
                             label: const Text('Manual add medication'),
                             style: FilledButton.styleFrom(
@@ -664,6 +689,18 @@ class _PillBottleCameraPageState extends State<PillBottleCameraPage> {
                               label: 'Instructions',
                               hint: 'e.g. Take with food',
                               icon: Icons.receipt_long_rounded,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: _frequencyController,
+                            keyboardType: TextInputType.number,
+                            textInputAction: TextInputAction.next,
+                            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+                            decoration: deco(
+                              label: 'Frequency (times per day)',
+                              hint: 'e.g. 2',
+                              icon: Icons.repeat_rounded,
                             ),
                           ),
                           const SizedBox(height: 16),

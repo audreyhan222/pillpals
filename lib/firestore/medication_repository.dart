@@ -27,9 +27,6 @@ class MedicationRepository {
       final times = details.times.toList()
         ..sort((a, b) => (a.hour * 60 + a.minute).compareTo(b.hour * 60 + b.minute));
       final timesMinutes = times.map((t) => t.hour * 60 + t.minute).toList();
-      final schedule = times.isEmpty
-          ? ''
-          : 'Daily at ${times.map((t) => t.format(context)).join(', ')}';
 
       // We don’t know quantity-left from scan; default to 0 and allow manual edit.
       await ElderlyMedicationCatalogRepository(firestore: _firestore).upsertMedication(
@@ -37,9 +34,9 @@ class MedicationRepository {
         name: details.name,
         totalLeft: 0,
         dosageAmount: details.dosage,
-        dosageSchedule: schedule,
         timesMinutes: timesMinutes,
         instructions: details.instructions,
+        intervalMinutes: details.intervalMinutes > 0 ? details.intervalMinutes : null,
       );
       return;
     }
@@ -66,6 +63,7 @@ class MedicationRepository {
       'dosage': details.dosage,
       'instructions': details.instructions,
       'times': times, // list<int> minutes since midnight
+      if (details.intervalMinutes > 0) 'intervalMinutes': details.intervalMinutes,
       'rawText': details.rawText,
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),

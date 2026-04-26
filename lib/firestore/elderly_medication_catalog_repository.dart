@@ -8,7 +8,7 @@ class ElderlyMedicationCatalogEntry {
     required this.name,
     required this.totalLeft,
     required this.dosageAmount,
-    required this.dosageSchedule,
+    required this.intervalMinutes,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -22,8 +22,9 @@ class ElderlyMedicationCatalogEntry {
   /// E.g. "500mg", "1 tablet", "2 puffs".
   final String dosageAmount;
 
-  /// E.g. "Daily at 9am + 9pm", "Mon/Wed/Fri", "Every 8 hours".
-  final String dosageSchedule;
+  /// Optional interval between doses (in minutes).
+  /// If null/0, use explicit `timesMinutes` scheduling instead.
+  final int intervalMinutes;
 
   final DateTime? createdAt;
   final DateTime? updatedAt;
@@ -56,7 +57,7 @@ class ElderlyMedicationCatalogEntry {
       name: readString('name'),
       totalLeft: readInt('totalLeft'),
       dosageAmount: readString('dosageAmount'),
-      dosageSchedule: readString('dosageSchedule'),
+      intervalMinutes: readInt('intervalMinutes'),
       createdAt: readTimestamp('createdAt'),
       updatedAt: readTimestamp('updatedAt'),
     );
@@ -115,9 +116,9 @@ class ElderlyMedicationCatalogRepository {
     required String name,
     required int totalLeft,
     required String dosageAmount,
-    required String dosageSchedule,
     List<int>? timesMinutes,
     String? instructions,
+    int? intervalMinutes,
   }) async {
     final trimmedName = name.trim();
     if (trimmedName.isEmpty) {
@@ -132,9 +133,9 @@ class ElderlyMedicationCatalogRepository {
         'name': trimmedName,
         'totalLeft': totalLeft,
         'dosageAmount': dosageAmount.trim(),
-        'dosageSchedule': dosageSchedule.trim(),
         if (instructions != null) 'instructions': instructions.trim(),
         if (timesMinutes != null) 'timesMinutes': timesMinutes,
+        if (intervalMinutes != null) 'intervalMinutes': intervalMinutes,
         'updatedAt': FieldValue.serverTimestamp(),
         'createdAt': FieldValue.serverTimestamp(),
       },

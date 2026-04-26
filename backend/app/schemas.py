@@ -142,6 +142,8 @@ class ScanMedicationOut(BaseModel):
     name: str
     dosage: str
     instructions: str
+    frequency_per_day: int = 0
+    recommended_times_minutes: list[int] = []
 
 
 class PushTokenIn(BaseModel):

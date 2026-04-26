@@ -1,8 +1,10 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../state/pill_completion_store.dart';
+import '../../state/session_store.dart';
 
 class DashboardRightScreen extends StatelessWidget {
   const DashboardRightScreen({super.key});
@@ -10,7 +12,8 @@ class DashboardRightScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = context.watch<PillCompletionStore>();
-    const expectedDoseCount = 3; // Matches the current "Today’s pills" list.
+    final session = context.watch<SessionStore>();
+    final username = session.username?.trim() ?? '';
     return Scaffold(
       body: Container(
         width: double.infinity,
@@ -39,13 +42,29 @@ class DashboardRightScreen extends StatelessWidget {
                   onTap: () => context.pop(),
                 ),
                 const SizedBox(height: 18),
-                const Text(
-                  'Calendar',
-                  style: TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.w900,
-                    color: Color(0xFF1E2D4A),
-                  ),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Calendar',
+                        style: TextStyle(
+                          fontSize: 26,
+                          fontWeight: FontWeight.w900,
+                          color: Color(0xFF1E2D4A),
+                        ),
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: () => context.push('/ocr/labels'),
+                      icon: const Icon(Icons.menu_book_outlined, size: 18),
+                      label: const Text('Label library'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: const Color(0xFF2E7D6A),
+                        textStyle: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 10),
                 Expanded(
@@ -75,7 +94,8 @@ class DashboardRightScreen extends StatelessWidget {
                     ),
                     child: _PillCalendarCard(
                       store: store,
-                      expectedDoseCount: expectedDoseCount,
+                      expectedDoseCount: 0,
+                      elderlyUsername: username,
                     ),
                   ),
                 ),
@@ -132,10 +152,12 @@ class _PillCalendarCard extends StatefulWidget {
   const _PillCalendarCard({
     required this.store,
     required this.expectedDoseCount,
+    required this.elderlyUsername,
   });
 
   final PillCompletionStore store;
   final int expectedDoseCount;
+  final String elderlyUsername;
 
   @override
   State<_PillCalendarCard> createState() => _PillCalendarCardState();
@@ -171,16 +193,23 @@ class _PillCalendarCardState extends State<_PillCalendarCard> {
 
     final header = '${_monthNames[_month.month - 1]} ${_month.year}';
     final selectedKey = PillCompletionStore.dayKey(_selected);
-    final selectedTaken = widget.store.takenDoseIdsForDay(_selected).toList()
-      ..sort();
-    final isSelectedComplete = widget.store.isDayComplete(
-      date: _selected,
-      expectedDoseCount: widget.expectedDoseCount,
-    );
+    final selectedTaken = widget.store.takenDoseIdsForDay(_selected).toList()..sort();
+    final username = widget.elderlyUsername.trim();
+    final statusRef = username.isEmpty
+        ? null
+        : FirebaseFirestore.instance
+            .collection('elderly')
+            .doc(username)
+            .collection('dailyStatus')
+            .doc(selectedKey);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (username.isNotEmpty) ...[
+          _StreakHeader(elderlyUsername: username),
+          const SizedBox(height: 14),
+        ],
         Row(
           children: [
             _MiniGlassIconButton(icon: Icons.chevron_left_rounded, onTap: _prevMonth),
@@ -240,27 +269,55 @@ class _PillCalendarCardState extends State<_PillCalendarCard> {
                       ),
                     ),
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: isSelectedComplete
-                          ? const Color(0xFFDBF7E8)
-                          : const Color(0xFFE8EFFE),
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.9),
-                        width: 1.0,
+                  if (statusRef != null)
+                    StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                      stream: statusRef.snapshots(),
+                      builder: (context, snap) {
+                        final data = snap.data?.data();
+                        final complete = data?['complete'] == true;
+                        return Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: complete
+                                ? const Color(0xFFDBF7E8)
+                                : const Color(0xFFE8EFFE),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.9),
+                              width: 1.0,
+                            ),
+                          ),
+                          child: Text(
+                            complete ? 'All taken ✅' : 'Not complete yet',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w900,
+                              color: complete ? const Color(0xFF1E6A4B) : accent,
+                            ),
+                          ),
+                        );
+                      },
+                    )
+                  else
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE8EFFE),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.9),
+                          width: 1.0,
+                        ),
+                      ),
+                      child: const Text(
+                        'Sign in to track',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                          color: accent,
+                        ),
                       ),
                     ),
-                    child: Text(
-                      isSelectedComplete ? 'All taken ✅' : 'Not complete yet',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w900,
-                        color: isSelectedComplete ? const Color(0xFF1E6A4B) : accent,
-                      ),
-                    ),
-                  ),
                 ],
               ),
               const SizedBox(height: 10),
@@ -273,21 +330,197 @@ class _PillCalendarCardState extends State<_PillCalendarCard> {
                 ),
               ),
               const SizedBox(height: 6),
-              Text(
-                selectedTaken.isEmpty
-                    ? 'No pills marked taken on this day yet.'
-                    : 'Taken (${selectedTaken.length}/${widget.expectedDoseCount}): ${selectedTaken.join(', ')}',
-                style: TextStyle(
-                  fontSize: 13,
-                  height: 1.25,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.black.withValues(alpha: 0.60),
+              if (statusRef != null)
+                StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                  stream: statusRef.snapshots(),
+                  builder: (context, snap) {
+                    final data = snap.data?.data();
+                    int readInt(String key, {required int fallback}) {
+                      final v = data?[key];
+                      if (v is int) return v;
+                      if (v is num) return v.round();
+                      return fallback;
+                    }
+
+                    final takenCount =
+                        readInt('takenCount', fallback: selectedTaken.length);
+                    final expectedCount = readInt('expectedCount', fallback: 0);
+                    final label = expectedCount > 0
+                        ? 'Taken ($takenCount/$expectedCount)'
+                        : 'Taken ($takenCount)';
+                    return Text(
+                      takenCount == 0 ? 'No pills marked taken on this day yet.' : label,
+                      style: TextStyle(
+                        fontSize: 13,
+                        height: 1.25,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.black.withValues(alpha: 0.60),
+                      ),
+                    );
+                  },
+                )
+              else
+                Text(
+                  selectedTaken.isEmpty
+                      ? 'No pills marked taken on this day yet.'
+                      : 'Taken (${selectedTaken.length})',
+                  style: TextStyle(
+                    fontSize: 13,
+                    height: 1.25,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.black.withValues(alpha: 0.60),
+                  ),
                 ),
-              ),
             ],
           ),
         ),
       ],
+    );
+  }
+}
+
+class _StreakHeader extends StatelessWidget {
+  const _StreakHeader({required this.elderlyUsername});
+
+  final String elderlyUsername;
+
+  static DateTime _parseDayKey(String key) {
+    final parts = key.split('-');
+    if (parts.length != 3) return DateTime.now();
+    final y = int.tryParse(parts[0]) ?? DateTime.now().year;
+    final m = int.tryParse(parts[1]) ?? DateTime.now().month;
+    final d = int.tryParse(parts[2]) ?? DateTime.now().day;
+    return DateTime(y, m, d);
+  }
+
+  static String _dayKey(DateTime d) {
+    final mm = d.month.toString().padLeft(2, '0');
+    final dd = d.day.toString().padLeft(2, '0');
+    return '${d.year}-$mm-$dd';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final u = elderlyUsername.trim();
+    final ref = FirebaseFirestore.instance
+        .collection('elderly')
+        .doc(u)
+        .collection('dailyStatus')
+        .orderBy('dayKey', descending: true)
+        .limit(120);
+
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: ref.snapshots(),
+      builder: (context, snap) {
+        int current = 0;
+        int best = 0;
+
+        final completeDays = <String, bool>{};
+        if (snap.hasData) {
+          for (final doc in snap.data!.docs) {
+            final data = doc.data();
+            final key = (data['dayKey'] as String?)?.trim() ?? doc.id;
+            final complete = data['complete'] == true;
+            if (key.isNotEmpty) completeDays[key] = complete;
+          }
+        }
+
+        final today = DateTime.now();
+        DateTime cursor = DateTime(today.year, today.month, today.day);
+        while (true) {
+          final k = _dayKey(cursor);
+          if (completeDays[k] == true) {
+            current++;
+            cursor = cursor.subtract(const Duration(days: 1));
+            continue;
+          }
+          break;
+        }
+
+        final keys = completeDays.keys.toList()
+          ..sort((a, b) => _parseDayKey(a).compareTo(_parseDayKey(b)));
+        int run = 0;
+        DateTime? prev;
+        for (final k in keys) {
+          if (completeDays[k] != true) {
+            run = 0;
+            prev = null;
+            continue;
+          }
+          final dt = _parseDayKey(k);
+          if (prev == null || dt.difference(prev).inDays == 1) {
+            run += 1;
+          } else {
+            run = 1;
+          }
+          if (run > best) best = run;
+          prev = dt;
+        }
+
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.75),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.9), width: 1.4),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.07),
+                blurRadius: 24,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFDBF7E8).withValues(alpha: 0.8),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(
+                  Icons.local_fire_department_rounded,
+                  color: Color(0xFF1E6A4B),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Streak',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.35,
+                        color: Color(0xFF1E2D4A),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '$current days in a row',
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Best: $best days',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.black.withValues(alpha: 0.6),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

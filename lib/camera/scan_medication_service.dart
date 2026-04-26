@@ -9,12 +9,16 @@ class ScanMedicationAiResult {
     required this.name,
     required this.dosage,
     required this.instructions,
+    required this.frequencyPerDay,
+    required this.recommendedTimesMinutes,
     required this.raw,
   });
 
   final String name;
   final String dosage;
   final String instructions;
+  final int frequencyPerDay;
+  final List<int> recommendedTimesMinutes;
   final Map<String, dynamic> raw;
 }
 
@@ -57,10 +61,35 @@ class ScanMedicationService {
         ? readString('instructions')
         : readString('direction');
 
+    int readInt(String key) {
+      final v = data[key];
+      if (v is int) return v;
+      if (v is num) return v.round();
+      if (v is String) return int.tryParse(v.trim()) ?? 0;
+      return 0;
+    }
+
+    List<int> readIntList(String key) {
+      final v = data[key];
+      if (v is! List) return const [];
+      final out = <int>[];
+      for (final item in v) {
+        if (item is int) out.add(item);
+        if (item is num) out.add(item.round());
+        if (item is String) {
+          final parsed = int.tryParse(item.trim());
+          if (parsed != null) out.add(parsed);
+        }
+      }
+      return out;
+    }
+
     return ScanMedicationAiResult(
       name: name,
       dosage: dosage,
       instructions: instructions,
+      frequencyPerDay: readInt('frequency_per_day'),
+      recommendedTimesMinutes: readIntList('recommended_times_minutes'),
       raw: data,
     );
   }

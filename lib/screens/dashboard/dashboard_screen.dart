@@ -5,13 +5,16 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:async';
 
 import '../../pals/pill_pal.dart';
 import '../../state/pill_completion_store.dart';
 import '../../state/device_user_id_store.dart';
 import '../../state/session_store.dart';
+import '../../notifications/notification_service.dart';
 import '../../tamagotchi_backend/tamagotchi_expression_engine.dart';
 import '../../tamagotchi_backend/tamagotchi_timer_service.dart';
+import '../../debug/debug_log.dart';
 
 extension _FirstOrNullExt<T> on Iterable<T> {
   T? get firstOrNull => isEmpty ? null : first;
@@ -30,10 +33,14 @@ class _DashboardScreenState extends State<DashboardScreen>
   late final TamagotchiExpressionEngine _engine;
   late final TamagotchiTimerService _timer;
   final Set<String> _registeredDoseIds = <String>{};
+  StreamSubscription<NotificationEvent>? _notifSub;
+  StreamSubscription? _nudgeSub;
+  String? _lastNudgeDocId;
 
   PillPal? _selectedPal;
   String _palName = 'Pal';
   PalExpression _expression = PalExpression.neutral;
+  double _happiness = 0.55;
   bool _petPromptShown = false;
   bool _palBootstrapped = false;
   bool _palBootstrapScheduled = false;
@@ -42,29 +49,32 @@ class _DashboardScreenState extends State<DashboardScreen>
     _PillItem(
       name: 'Metformin',
       dose: '500mg',
-      timeLabel: 'Morning',
+      timeLabel: '8:00 AM',
       instructions:
           'Take with food. If you feel nauseous, drink water and eat a small snack.',
       color: Color(0xFF4A90D9),
       icon: Icons.medication_outlined,
+      minutesOfDay: 8 * 60,
     ),
     _PillItem(
       name: 'Vitamin D',
       dose: '1 capsule',
-      timeLabel: 'Afternoon',
+      timeLabel: '2:00 PM',
       instructions:
           'Take with a meal. If you miss it, you can take it later today.',
       color: Color(0xFFE5A800),
       icon: Icons.sunny,
+      minutesOfDay: 14 * 60,
     ),
     _PillItem(
       name: 'Atorvastatin',
       dose: '20mg',
-      timeLabel: 'Night',
+      timeLabel: '9:00 PM',
       instructions:
           'Take at night. Avoid grapefruit. If you have muscle pain, tell your doctor.',
       color: Color(0xFF7DB8F7),
       icon: Icons.nightlight_round,
+      minutesOfDay: 21 * 60,
     ),
   ];
 
@@ -86,9 +96,108 @@ class _DashboardScreenState extends State<DashboardScreen>
       tickInterval: const Duration(seconds: 10),
       onExpressionChanged: (expr) {
         if (!mounted) return;
-        setState(() => _expression = expr);
+        setState(() {
+          _expression = expr;
+          _happiness = _engine.happiness;
+        });
+      },
+      onTick: () {
+        if (!mounted) return;
+        // Ensure the happiness meter repaints even if expression didn't change.
+        setState(() => _happiness = _engine.happiness);
       },
     )..start();
+
+    _notifSub = NotificationService.instance.eventStream.listen((event) {
+      final parsed = DoseReminderPayload.tryDecode(event.payload);
+      if (parsed == null) return;
+      // Stage 2 is +5 minutes after pill time.
+      if (parsed.stage == 2) {
+        _engine.applyHappinessPenalty(0.25);
+        if (mounted) {
+          setState(() {
+            _expression = _engine.expression;
+            _happiness = _engine.happiness;
+          });
+        }
+      }
+      // Stage 3 is +10 minutes after pill time.
+      if (parsed.stage == 3) {
+        _engine.applyHappinessPenalty(0.30);
+        if (mounted) {
+          setState(() {
+            _expression = _engine.expression;
+            _happiness = _engine.happiness;
+          });
+        }
+      }
+    });
+
+    // Caregiver nudges (Firestore → local notification).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final session = context.read<SessionStore>();
+      final role = session.role;
+      final username = session.username?.trim() ?? '';
+      if (role != 'elderly' || username.isEmpty) return;
+
+      _nudgeSub?.cancel();
+      _nudgeSub = FirebaseFirestore.instance
+          .collection('elderly')
+          .doc(username)
+          .collection('caregiverNudges')
+          .orderBy('createdAt', descending: true)
+          .limit(1)
+          .snapshots()
+          .listen((snap) {
+        // #region agent log
+        DebugLog.write(
+          runId: 'pre',
+          hypothesisId: 'NUDGE_SPAM',
+          location: 'dashboard_screen.dart:nudge_listener',
+          message: 'Nudge snapshot',
+          data: {'count': snap.docs.length},
+        );
+        // #endregion
+        if (snap.docs.isEmpty) return;
+        final doc = snap.docs.first;
+        // #region agent log
+        DebugLog.write(
+          runId: 'pre',
+          hypothesisId: 'NUDGE_SPAM',
+          location: 'dashboard_screen.dart:nudge_listener',
+          message: 'Nudge doc seen',
+          data: {'docId': doc.id, 'isDuplicate': _lastNudgeDocId == doc.id},
+        );
+        // #endregion
+        if (_lastNudgeDocId == doc.id) return;
+        _lastNudgeDocId = doc.id;
+        final data = doc.data();
+        final title = (data['title'] as String?)?.trim() ?? 'Medication reminder';
+        final body = (data['body'] as String?)?.trim() ??
+            'Your caregiver sent a reminder to take your meds.';
+
+        // #region agent log
+        DebugLog.write(
+          runId: 'pre',
+          hypothesisId: 'NUDGE_SPAM',
+          location: 'dashboard_screen.dart:nudge_listener',
+          message: 'Received caregiver nudge snapshot',
+          data: {
+            'docId': doc.id,
+            'hasTitle': title.isNotEmpty,
+            'hasBody': body.isNotEmpty,
+          },
+        );
+        // #endregion
+
+        NotificationService.instance.showCaregiverNudgeNow(
+          title: title,
+          body: body,
+          payload: 'caregiver_nudge:${doc.id}',
+        );
+      });
+    });
   }
 
   /// Pal prefs live on `elderly/{username}` for signed-in elderly users; otherwise
@@ -140,6 +249,8 @@ class _DashboardScreenState extends State<DashboardScreen>
   void dispose() {
     _petController.dispose();
     _timer.dispose();
+    _notifSub?.cancel();
+    _nudgeSub?.cancel();
     super.dispose();
   }
 
@@ -203,7 +314,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.of(context).pop(),
+                onPressed: () => Navigator.of(context).pop(''),
                 child: const Text('Cancel'),
               ),
               FilledButton(
@@ -217,6 +328,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 
       final trimmed = (name ?? '').trim();
       if (!mounted) return;
+      // Cancel should not trigger validation/snackbars.
       if (trimmed.isEmpty) return;
       setState(() => _palName = trimmed);
 
@@ -254,6 +366,332 @@ class _DashboardScreenState extends State<DashboardScreen>
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (context) {
+        Future<void> editMedication() async {
+          final elderlyUsername = pill.elderlyUsername?.trim() ?? '';
+          final docId = pill.medicationDocId?.trim() ?? '';
+          if (elderlyUsername.isEmpty || docId.isEmpty) {
+            ScaffoldMessenger.of(this.context).showSnackBar(
+              const SnackBar(content: Text('This entry cannot be edited.')),
+            );
+            return;
+          }
+
+          final db = FirebaseFirestore.instance;
+          final ref = db
+              .collection('elderly')
+              .doc(elderlyUsername)
+              .collection('medicationCatalog')
+              .doc(docId);
+
+          final snap = await ref.get();
+          final data = snap.data() ?? const <String, dynamic>{};
+          final originalName =
+              ((data['name'] as String?)?.trim() ?? pill.name).trim();
+          final originalTimes = ((data['timesMinutes'] as List?)?.cast<dynamic>() ?? const [])
+              .map((t) => t is int ? t : (t is num ? t.round() : null))
+              .whereType<int>()
+              .where((m) => m >= 0 && m < 24 * 60)
+              .toSet()
+              .toList()
+            ..sort();
+
+          final nameCtrl = TextEditingController(text: (data['name'] as String?)?.trim() ?? pill.name);
+          final dosageCtrl = TextEditingController(
+            text: (data['dosageAmount'] as String?)?.trim() ?? pill.dose,
+          );
+          final instrCtrl = TextEditingController(
+            text: (data['instructions'] as String?)?.trim() ?? pill.instructions,
+          );
+          final totalLeftCtrl = TextEditingController(
+            text: (() {
+              final v = data['totalLeft'];
+              if (v is int) return v.toString();
+              if (v is num) return v.round().toString();
+              return '';
+            })(),
+          );
+          var times = ((data['timesMinutes'] as List?)?.cast<dynamic>() ?? const [])
+              .map((t) => t is int ? t : (t is num ? t.round() : null))
+              .whereType<int>()
+              .where((m) => m >= 0 && m < 24 * 60)
+              .toSet()
+              .toList()
+            ..sort();
+
+          try {
+            if (!mounted) return;
+            final saved = await showDialog<bool>(
+              context: this.context,
+              builder: (ctx) {
+                return StatefulBuilder(
+                  builder: (ctx, setLocal) {
+                    Future<void> addTimeWheel() async {
+                      int hh = 9;
+                      int mm = 0;
+                      final ok = await showModalBottomSheet<bool>(
+                        context: ctx,
+                        showDragHandle: true,
+                        useSafeArea: true,
+                        builder: (ctx2) {
+                          return SizedBox(
+                            height: 340,
+                            child: Column(
+                              children: [
+                                const SizedBox(height: 6),
+                                const Text(
+                                  'Pick a time',
+                                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+                                ),
+                                const SizedBox(height: 8),
+                                Expanded(
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: ListWheelScrollView.useDelegate(
+                                          itemExtent: 40,
+                                          physics: const FixedExtentScrollPhysics(),
+                                          onSelectedItemChanged: (v) => hh = v,
+                                          childDelegate: ListWheelChildBuilderDelegate(
+                                            childCount: 24,
+                                            builder: (context, index) => Center(
+                                              child: Text(index.toString().padLeft(2, '0')),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      Expanded(
+                                        child: ListWheelScrollView.useDelegate(
+                                          itemExtent: 40,
+                                          physics: const FixedExtentScrollPhysics(),
+                                          onSelectedItemChanged: (v) => mm = v,
+                                          childDelegate: ListWheelChildBuilderDelegate(
+                                            childCount: 60,
+                                            builder: (context, index) => Center(
+                                              child: Text(index.toString().padLeft(2, '0')),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Padding(
+                                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: TextButton(
+                                          onPressed: () => Navigator.of(ctx2).pop(false),
+                                          child: const Text('Cancel'),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: FilledButton(
+                                          onPressed: () => Navigator.of(ctx2).pop(true),
+                                          child: const Text('Add'),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      );
+                      if (ok != true) return;
+                      final minutes = hh * 60 + mm;
+                      if (!times.contains(minutes)) {
+                        setLocal(() {
+                          times = [...times, minutes]..sort();
+                        });
+                      }
+                    }
+
+                    return AlertDialog(
+                      title: const Text('Edit medication'),
+                      content: SingleChildScrollView(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            TextField(
+                              controller: nameCtrl,
+                              decoration: const InputDecoration(labelText: 'Name'),
+                            ),
+                            const SizedBox(height: 10),
+                            TextField(
+                              controller: totalLeftCtrl,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(labelText: 'Total left'),
+                            ),
+                            const SizedBox(height: 10),
+                            TextField(
+                              controller: dosageCtrl,
+                              decoration: const InputDecoration(labelText: 'Dosage amount'),
+                            ),
+                            const SizedBox(height: 10),
+                            TextField(
+                              controller: instrCtrl,
+                              minLines: 2,
+                              maxLines: 3,
+                              decoration: const InputDecoration(labelText: 'Instructions'),
+                            ),
+                            const SizedBox(height: 14),
+                            Row(
+                              children: [
+                                const Expanded(
+                                  child: Text('Times', style: TextStyle(fontWeight: FontWeight.w900)),
+                                ),
+                                TextButton.icon(
+                                  onPressed: addTimeWheel,
+                                  icon: const Icon(Icons.add_alarm_rounded),
+                                  label: const Text('Add'),
+                                ),
+                              ],
+                            ),
+                            if (times.isEmpty)
+                              const Align(
+                                alignment: Alignment.centerLeft,
+                                child: Text('No times set.'),
+                              )
+                            else
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: times
+                                      .map((m) {
+                                        final tod = TimeOfDay(hour: m ~/ 60, minute: m % 60);
+                                        return InputChip(
+                                          label: Text(tod.format(ctx)),
+                                          onDeleted: () => setLocal(() {
+                                            times = times.where((x) => x != m).toList();
+                                          }),
+                                        );
+                                      })
+                                      .toList(),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.of(ctx).pop(false),
+                          child: const Text('Cancel'),
+                        ),
+                        FilledButton(
+                          onPressed: () => Navigator.of(ctx).pop(true),
+                          child: const Text('Save'),
+                        ),
+                      ],
+                    );
+                  },
+                );
+              },
+            );
+
+            if (saved != true) return;
+
+            final trimmedName = nameCtrl.text.trim();
+            final left = int.tryParse(totalLeftCtrl.text.trim()) ?? 0;
+
+            await ref.set(
+              <String, dynamic>{
+                'name': trimmedName,
+                'totalLeft': left,
+                'dosageAmount': dosageCtrl.text.trim(),
+                'instructions': instrCtrl.text.trim(),
+                'timesMinutes': times,
+                'updatedAt': FieldValue.serverTimestamp(),
+              },
+              SetOptions(merge: true),
+            );
+
+            // Keep reminders + dose IDs in sync with updated times.
+            // Cancel all previously scheduled series for the old times,
+            // then schedule for the new times.
+            try {
+              for (final m in originalTimes) {
+                final hh = (m ~/ 60).toString().padLeft(2, '0');
+                final mm = (m % 60).toString().padLeft(2, '0');
+                final oldDoseId = '${originalName.toLowerCase()}_$hh$mm';
+                await NotificationService.instance.cancelEscalationSeries(doseId: oldDoseId);
+              }
+              for (final m in times) {
+                final hh = (m ~/ 60).toString().padLeft(2, '0');
+                final mm = (m % 60).toString().padLeft(2, '0');
+                final newDoseId = '${trimmedName.toLowerCase()}_$hh$mm';
+                await NotificationService.instance.scheduleEscalatingDoseReminder(
+                  doseId: newDoseId,
+                  medicationName: trimmedName.isEmpty ? 'Medication' : trimmedName,
+                  time: TimeOfDay(hour: m ~/ 60, minute: m % 60),
+                );
+              }
+            } catch (_) {
+              // Non-fatal: Firestore update succeeded; reminders can be resynced on next save.
+            }
+
+            if (mounted) {
+              ScaffoldMessenger.of(this.context).showSnackBar(
+                const SnackBar(content: Text('Medication updated')),
+              );
+            }
+          } finally {
+            nameCtrl.dispose();
+            dosageCtrl.dispose();
+            instrCtrl.dispose();
+            totalLeftCtrl.dispose();
+          }
+        }
+
+        Future<void> deleteMedication() async {
+          final elderlyUsername = pill.elderlyUsername?.trim() ?? '';
+          final docId = pill.medicationDocId?.trim() ?? '';
+          if (elderlyUsername.isEmpty || docId.isEmpty) {
+            ScaffoldMessenger.of(this.context).showSnackBar(
+              const SnackBar(content: Text('This entry cannot be deleted.')),
+            );
+            return;
+          }
+          final ok = await showDialog<bool>(
+            context: this.context,
+            builder: (ctx) {
+              return AlertDialog(
+                title: const Text('Delete medication?'),
+                content: Text('Delete “${pill.name}”? This can’t be undone.'),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(ctx).pop(false),
+                    child: const Text('Cancel'),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.of(ctx).pop(true),
+                    child: const Text('Delete'),
+                  ),
+                ],
+              );
+            },
+          );
+          if (ok != true) return;
+
+          await FirebaseFirestore.instance
+              .collection('elderly')
+              .doc(elderlyUsername)
+              .collection('medicationCatalog')
+              .doc(docId)
+              .delete();
+
+          if (mounted) {
+            Navigator.of(this.context).pop(); // close pill sheet
+            ScaffoldMessenger.of(this.context).showSnackBar(
+              const SnackBar(content: Text('Medication deleted')),
+            );
+          }
+        }
+
         return DraggableScrollableSheet(
           expand: false,
           minChildSize: 0.35,
@@ -328,6 +766,27 @@ class _DashboardScreenState extends State<DashboardScreen>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
+                        if ((pill.elderlyUsername ?? '').trim().isNotEmpty &&
+                            (pill.medicationDocId ?? '').trim().isNotEmpty) ...[
+                          FilledButton.tonalIcon(
+                            onPressed: () async {
+                              HapticFeedback.lightImpact();
+                              await editMedication();
+                            },
+                            icon: const Icon(Icons.edit_rounded),
+                            label: const Text('Edit pill'),
+                          ),
+                          const SizedBox(height: 10),
+                          FilledButton.tonalIcon(
+                            onPressed: () async {
+                              HapticFeedback.lightImpact();
+                              await deleteMedication();
+                            },
+                            icon: const Icon(Icons.delete_outline_rounded),
+                            label: const Text('Delete'),
+                          ),
+                          const SizedBox(height: 10),
+                        ],
                         FilledButton.icon(
                           onPressed: alreadyTaken
                               ? null
@@ -337,16 +796,30 @@ class _DashboardScreenState extends State<DashboardScreen>
                                     doseId: pill.doseId,
                                   );
                                   try {
+                                    // Happiness gain based on interval:
+                                    // 1 / (24 / intervalHours) == intervalHours / 24
+                                    final intervalMinutes = pill.intervalMinutes ?? 1440;
+                                    final intervalHours = (intervalMinutes / 60.0).clamp(0.0, 24.0);
+                                    // Slow the gain rate a bit so it feels more earned.
+                                    final delta = intervalHours / 48.0;
+                                    _engine.registerDoseTaken(
+                                      doseId: pill.doseId,
+                                      happinessDelta: delta,
+                                    );
                                     await _persistDoseTakenToFirestore(
                                       date: today,
                                       doseId: pill.doseId,
                                     );
+                                    await NotificationService.instance
+                                        .cancelEscalationSeries(doseId: pill.doseId);
                                   } catch (_) {
                                     // Non-fatal: local completion still works.
                                   }
-                                  _engine.registerDoseTaken(doseId: pill.doseId);
                                   if (!mounted) return;
-                                  setState(() => _expression = _engine.expression);
+                                  setState(() {
+                                    _expression = _engine.expression;
+                                    _happiness = _engine.happiness;
+                                  });
                                   if (context.mounted) context.pop();
                                 },
                           icon: Icon(
@@ -390,12 +863,45 @@ class _DashboardScreenState extends State<DashboardScreen>
         .collection('dailyStatus')
         .doc(key);
 
+    // Expected doses for the day = all scheduled times across the current catalog.
+    // We persist this alongside taken doses so streaks can be computed from Firestore alone.
+    final expectedDoseIds = <String>{};
+    try {
+      final catalogSnap = await FirebaseFirestore.instance
+          .collection('elderly')
+          .doc(username)
+          .collection('medicationCatalog')
+          .get();
+      for (final doc in catalogSnap.docs) {
+        final data = doc.data();
+        final name = (data['name'] as String?)?.trim() ?? '';
+        if (name.isEmpty) continue;
+        final times = (data['timesMinutes'] as List?)?.cast<dynamic>() ?? const [];
+        for (final t in times) {
+          final minutes = t is int ? t : (t is num ? t.round() : null);
+          if (minutes == null) continue;
+          if (minutes < 0 || minutes >= 24 * 60) continue;
+          final hh = (minutes ~/ 60).toString().padLeft(2, '0');
+          final mm = (minutes % 60).toString().padLeft(2, '0');
+          expectedDoseIds.add('${name.toLowerCase()}_$hh$mm');
+        }
+      }
+    } catch (_) {
+      // Non-fatal: if we can't compute expected doses, we still record taken doses.
+    }
+
     await FirebaseFirestore.instance.runTransaction((txn) async {
       final snap = await txn.get(ref);
       final data = snap.data();
       final taken = (data?['takenDoseIds'] as List?)?.cast<dynamic>() ?? const [];
       final alreadyTaken = taken.any((e) => e.toString() == doseId);
       if (alreadyTaken) return;
+
+      final takenCountNew = taken.length + 1;
+      final expectedCount = expectedDoseIds.isEmpty
+          ? (data?['expectedCount'] as int?) ?? 0
+          : expectedDoseIds.length;
+      final isComplete = expectedCount > 0 && takenCountNew >= expectedCount;
 
       txn.set(
         ref,
@@ -404,6 +910,9 @@ class _DashboardScreenState extends State<DashboardScreen>
           'date': key,
           'takenDoseIds': FieldValue.arrayUnion([doseId]),
           'takenCount': FieldValue.increment(1),
+          if (expectedDoseIds.isNotEmpty) 'expectedDoseIds': expectedDoseIds.toList()..sort(),
+          if (expectedDoseIds.isNotEmpty) 'expectedCount': expectedDoseIds.length,
+          'complete': isComplete,
           'updatedAt': FieldValue.serverTimestamp(),
           'createdAt': FieldValue.serverTimestamp(),
         },
@@ -572,9 +1081,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                   Positioned(
                     top: 96,
                     right: 14,
-                    child: _CircleNavButton(
-                      icon: Icons.local_fire_department_rounded,
-                      label: 'Notifications',
+                    child: _StreakCircleButton(
+                      elderlyUsername: username,
                       onTap: () {
                         HapticFeedback.lightImpact();
                         context.push('/dashboard/right');
@@ -589,7 +1097,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    _HappinessMeter(expression: _expression),
+                    _AnimatedHappinessMeter(value: _happiness),
                     const SizedBox(height: 10),
                     if (role == 'elderly' && username.isNotEmpty)
                       StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
@@ -611,6 +1119,12 @@ class _DashboardScreenState extends State<DashboardScreen>
                               final times = (data['timesMinutes'] as List?)
                                       ?.cast<dynamic>() ??
                                   const [];
+                              final intervalMinutesRaw = data['intervalMinutes'];
+                              final intervalMinutes = intervalMinutesRaw is int
+                                  ? intervalMinutesRaw
+                                  : (intervalMinutesRaw is num
+                                      ? intervalMinutesRaw.round()
+                                      : null);
                               if (times.isEmpty) {
                                 pills.add(
                                   _PillItem(
@@ -622,6 +1136,9 @@ class _DashboardScreenState extends State<DashboardScreen>
                                         : instructions,
                                     color: const Color(0xFF4A90D9),
                                     icon: Icons.medication_outlined,
+                                    medicationDocId: doc.id,
+                                    elderlyUsername: username,
+                                    intervalMinutes: intervalMinutes,
                                   ),
                                 );
                               } else {
@@ -644,6 +1161,10 @@ class _DashboardScreenState extends State<DashboardScreen>
                                         : instructions,
                                     color: const Color(0xFF4A90D9),
                                     icon: Icons.medication_outlined,
+                                    minutesOfDay: minutes,
+                                    medicationDocId: doc.id,
+                                    elderlyUsername: username,
+                                    intervalMinutes: intervalMinutes,
                                   );
                                   pills.add(pill);
                                 }
@@ -659,15 +1180,27 @@ class _DashboardScreenState extends State<DashboardScreen>
                             }
                           }
 
+                          // Hide pills that are already taken today.
+                          final store = context.watch<PillCompletionStore>();
+                          final today = DateTime.now();
+                          final remaining = pills
+                              .where((p) => !store.isDoseTaken(date: today, doseId: p.doseId))
+                              .toList();
+
                           return _TodayPillsPanel(
-                            pills: pills.isEmpty ? _todayPills : pills,
+                            pills: remaining.isEmpty ? const <_PillItem>[] : remaining,
                             onPillTap: _showPillDetails,
                           );
                         },
                       )
                     else
                       _TodayPillsPanel(
-                        pills: _todayPills,
+                        pills: _todayPills
+                            .where((p) => !context.watch<PillCompletionStore>().isDoseTaken(
+                                  date: DateTime.now(),
+                                  doseId: p.doseId,
+                                ))
+                            .toList(),
                         onPillTap: _showPillDetails,
                       ),
                   ],
@@ -683,12 +1216,14 @@ class _DashboardScreenState extends State<DashboardScreen>
 
 class _CircleNavButton extends StatelessWidget {
   const _CircleNavButton({
-    required this.icon,
+    this.icon,
+    this.iconWidget,
     required this.label,
     required this.onTap,
   });
 
-  final IconData icon;
+  final IconData? icon;
+  final Widget? iconWidget;
   final String label;
   final VoidCallback onTap;
 
@@ -720,14 +1255,121 @@ class _CircleNavButton extends StatelessWidget {
                 ),
               ],
             ),
-            child: Icon(
-              icon,
-              color: const Color(0xFF1E2D4A),
-              size: 34,
+            child: Center(
+              child: iconWidget ??
+                  Icon(
+                    icon,
+                    color: const Color(0xFF1E2D4A),
+                    size: 34,
+                  ),
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+class _StreakCircleButton extends StatelessWidget {
+  const _StreakCircleButton({
+    required this.elderlyUsername,
+    required this.onTap,
+  });
+
+  final String elderlyUsername;
+  final VoidCallback onTap;
+
+  static String _dayKey(DateTime d) {
+    final mm = d.month.toString().padLeft(2, '0');
+    final dd = d.day.toString().padLeft(2, '0');
+    return '${d.year}-$mm-$dd';
+  }
+
+  Color _flameColorForStreak(int streak) {
+    // 0..30 maps orange -> red.
+    final t = (streak / 30.0).clamp(0.0, 1.0);
+    return Color.lerp(const Color(0xFFFFA000), const Color(0xFFFF2D55), t) ??
+        const Color(0xFFFFA000);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final u = elderlyUsername.trim();
+    if (u.isEmpty) {
+      return _CircleNavButton(
+        icon: Icons.local_fire_department_rounded,
+        label: 'Streak',
+        onTap: onTap,
+      );
+    }
+
+    final ref = FirebaseFirestore.instance
+        .collection('elderly')
+        .doc(u)
+        .collection('dailyStatus')
+        .orderBy('dayKey', descending: true)
+        .limit(60);
+
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: ref.snapshots(),
+      builder: (context, snap) {
+        final complete = <String, bool>{};
+        if (snap.hasData) {
+          for (final doc in snap.data!.docs) {
+            final data = doc.data();
+            final key = (data['dayKey'] as String?)?.trim() ?? doc.id;
+            complete[key] = data['complete'] == true;
+          }
+        }
+
+        int streak = 0;
+        DateTime cursor = DateTime.now();
+        cursor = DateTime(cursor.year, cursor.month, cursor.day);
+        while (true) {
+          final k = _dayKey(cursor);
+          if (complete[k] == true) {
+            streak++;
+            cursor = cursor.subtract(const Duration(days: 1));
+            continue;
+          }
+          break;
+        }
+
+        final flameColor = _flameColorForStreak(streak);
+        final textColor =
+            streak >= 10 ? Colors.white : const Color(0xFF1E2D4A);
+
+        return _CircleNavButton(
+          label: 'Streak',
+          onTap: onTap,
+          iconWidget: Stack(
+            alignment: Alignment.center,
+            children: [
+              Icon(
+                Icons.local_fire_department_rounded,
+                color: flameColor,
+                size: 38,
+              ),
+              // Count in the middle of the flame.
+              Text(
+                streak.toString(),
+                style: TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 14,
+                  color: textColor,
+                  shadows: [
+                    Shadow(
+                      color: Colors.black.withValues(alpha: 0.18),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -844,35 +1486,94 @@ class _FloatingPalSprite extends StatelessWidget {
   }
 }
 
-class _HappinessMeter extends StatelessWidget {
-  const _HappinessMeter({required this.expression});
+class _AnimatedHappinessMeter extends StatefulWidget {
+  const _AnimatedHappinessMeter({required this.value});
 
-  final PalExpression expression;
+  /// Engine value 0.0–1.0; animates smoothly when this changes.
+  final double value;
 
-  double get _value => switch (expression) {
-        PalExpression.depressed => 0.20,
-        PalExpression.sad => 0.45,
-        PalExpression.neutral => 0.70,
-        PalExpression.happy => 1.00,
-      };
+  @override
+  State<_AnimatedHappinessMeter> createState() => _AnimatedHappinessMeterState();
+}
 
-  String get _label => switch (expression) {
-        PalExpression.depressed => 'Not feeling great',
-        PalExpression.sad => 'A bit down',
-        PalExpression.neutral => 'Doing okay',
-        PalExpression.happy => 'Feeling great',
-      };
+class _AnimatedHappinessMeterState extends State<_AnimatedHappinessMeter>
+    with SingleTickerProviderStateMixin {
+  static const _curve = Curves.easeOutCubic;
+  static const _duration = Duration(milliseconds: 900);
 
-  String get _emoji => switch (expression) {
-        PalExpression.depressed => '😢',
-        PalExpression.sad => '😕',
-        PalExpression.neutral => '🙂',
-        PalExpression.happy => '😁',
-      };
+  late final AnimationController _ctrl;
+  double _a = 0.55;
+  double _b = 0.55;
+
+  @override
+  void initState() {
+    super.initState();
+    final v = _clamp01(widget.value);
+    _a = v;
+    _b = v;
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: _duration,
+    )..addListener(() => setState(() {}));
+  }
+
+  @override
+  void didUpdateWidget(covariant _AnimatedHappinessMeter oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_sameTarget(oldWidget.value, widget.value)) return;
+    final t = _curve.transform(_ctrl.value);
+    _a = _a + (_b - _a) * t;
+    _b = _clamp01(widget.value);
+    _ctrl.forward(from: 0);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  bool _sameTarget(double u, double v) {
+    if (u.isNaN && v.isNaN) return true;
+    if (u.isNaN || v.isNaN) return false;
+    return (u - v).abs() < 0.0005;
+  }
+
+  double get _display01 {
+    final t = _curve.transform(_ctrl.value);
+    return _clamp01(_a + (_b - _a) * t);
+  }
+
+  double _clamp01(double v) {
+    if (v.isNaN) return 0.0;
+    return v < 0 ? 0.0 : (v > 1 ? 1.0 : v);
+  }
+
+  int get _percent => (_display01 * 100).round().clamp(0, 100);
+
+  String get _label {
+    final v = _display01;
+    if (v >= 0.85) return 'Feeling great';
+    if (v >= 0.55) return 'Doing okay';
+    if (v >= 0.30) return 'A bit down';
+    return 'Not feeling great';
+  }
+
+  String get _emoji {
+    final v = _display01;
+    if (v >= 0.85) return '😁';
+    if (v >= 0.55) return '🙂';
+    if (v >= 0.30) return '😕';
+    return '😢';
+  }
 
   @override
   Widget build(BuildContext context) {
-    final accent = Theme.of(context).colorScheme.primary;
+    Color meterColor() {
+      final t = _display01;
+      return Color.lerp(const Color(0xFFFF2D55), const Color(0xFF1EBC61), t) ??
+          const Color(0xFF1EBC61);
+    }
 
     return Container(
       width: 320,
@@ -905,13 +1606,30 @@ class _HappinessMeter extends StatelessWidget {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Happiness',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w900,
-                  color: Color(0xFF1E2D4A),
-                  letterSpacing: 0.2,
+              // Keep the title + % clear of the emoji in the top-right.
+              Padding(
+                padding: const EdgeInsets.only(right: 40),
+                child: Row(
+                  children: [
+                    const Text(
+                      'Happiness',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w900,
+                        color: Color(0xFF1E2D4A),
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '$_percent%',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.black.withValues(alpha: 0.45),
+                      ),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(height: 6),
@@ -927,12 +1645,11 @@ class _HappinessMeter extends StatelessWidget {
               ClipRRect(
                 borderRadius: BorderRadius.circular(999),
                 child: LinearProgressIndicator(
-                  // Mirrors the same backend-driven expression used for the pal sprite.
-                  value: _value,
+                  value: _display01,
                   minHeight: 12,
                   backgroundColor: const Color(0xFFE8EFFE).withValues(alpha: 0.95),
                   valueColor: AlwaysStoppedAnimation<Color>(
-                    Color.lerp(const Color(0xFFFFC947), accent, 0.55) ?? accent,
+                    meterColor(),
                   ),
                 ),
               ),
@@ -944,15 +1661,40 @@ class _HappinessMeter extends StatelessWidget {
   }
 }
 
-class _TodayPillsPanel extends StatelessWidget {
+class _TodayPillsPanel extends StatefulWidget {
   const _TodayPillsPanel({required this.pills, required this.onPillTap});
 
   final List<_PillItem> pills;
   final ValueChanged<_PillItem> onPillTap;
 
   @override
+  State<_TodayPillsPanel> createState() => _TodayPillsPanelState();
+}
+
+class _TodayPillsPanelState extends State<_TodayPillsPanel> {
+  Timer? _countdownTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    // Refresh the “time until dose” display once per minute.
+    _countdownTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _countdownTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final now = DateTime.now();
     final bottomInset = MediaQuery.of(context).padding.bottom;
+    final pills = widget.pills;
+    final onPillTap = widget.onPillTap;
 
     return Container(
       margin: const EdgeInsets.fromLTRB(14, 0, 14, 14),
@@ -998,20 +1740,32 @@ class _TodayPillsPanel extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 190),
-            child: ListView.separated(
-              shrinkWrap: true,
-              itemCount: pills.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 10),
-              itemBuilder: (context, index) {
-                final pill = pills[index];
-                return _PillTile(
-                  pill: pill,
-                  onTap: () => onPillTap(pill),
-                );
-              },
-            ),
+          // Keep panel height stable regardless of pill count.
+          SizedBox(
+            height: 190,
+            child: pills.isEmpty
+                ? Center(
+                    child: Text(
+                      'All done for today 🎉',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w900,
+                        color: Colors.black.withValues(alpha: 0.6),
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: EdgeInsets.zero,
+                    itemCount: pills.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (context, index) {
+                      final pill = pills[index];
+                      return _PillTile(
+                        pill: pill,
+                        asOf: now,
+                        onTap: () => onPillTap(pill),
+                      );
+                    },
+                  ),
           ),
         ],
       ),
@@ -1019,14 +1773,42 @@ class _TodayPillsPanel extends StatelessWidget {
   }
 }
 
+/// Time left until today’s scheduled dose, or "Overdue" if that time has passed.
+String _doseTimeRemainingLabel(_PillItem pill, DateTime asOf) {
+  final m = pill.minutesOfDay;
+  if (m == null) return '';
+  final h = m ~/ 60;
+  final min = m % 60;
+  final sched = DateTime(asOf.year, asOf.month, asOf.day, h, min);
+  final until = sched.difference(asOf);
+  if (until.isNegative) return 'Overdue';
+  if (until.inSeconds < 60) return 'Due now';
+  return 'in ${_formatHrsMinsUpcoming(until)}';
+}
+
+String _formatHrsMinsUpcoming(Duration d) {
+  var mins = d.inMinutes;
+  if (mins < 1) return '0m';
+  if (mins < 60) return '${mins}m';
+  final h = mins ~/ 60;
+  final m = mins % 60;
+  if (m == 0) return '${h}h';
+  return '${h}h ${m}m';
+}
+
 class _PillTile extends StatelessWidget {
-  const _PillTile({required this.pill, required this.onTap});
+  const _PillTile({required this.pill, required this.asOf, required this.onTap});
 
   final _PillItem pill;
+  final DateTime asOf;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    final remaining = _doseTimeRemainingLabel(pill, asOf);
+    final isOverdue = remaining == 'Overdue';
+    final isUnset = remaining.isEmpty;
+
     return Material(
       color: Colors.white.withValues(alpha: 0.6),
       borderRadius: BorderRadius.circular(18),
@@ -1034,7 +1816,7 @@ class _PillTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+          padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
           child: Row(
             children: [
               Container(
@@ -1075,7 +1857,27 @@ class _PillTile extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 100),
+                child: Text(
+                  isUnset ? '—' : remaining,
+                  textAlign: TextAlign.right,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    height: 1.15,
+                    color: isUnset
+                        ? Colors.black.withValues(alpha: 0.4)
+                        : (isOverdue
+                            ? const Color(0xFFE85D4C)
+                            : const Color(0xFF2E7D6A)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 2),
               Icon(
                 Icons.info_outline_rounded,
                 color: Colors.black.withValues(alpha: 0.45),
@@ -1097,6 +1899,10 @@ class _PillItem {
     required this.instructions,
     required this.color,
     required this.icon,
+    this.minutesOfDay,
+    this.medicationDocId,
+    this.elderlyUsername,
+    this.intervalMinutes,
   });
 
   final String name;
@@ -1105,8 +1911,18 @@ class _PillItem {
   final String instructions;
   final Color color;
   final IconData icon;
+  final int? minutesOfDay;
+  final String? medicationDocId;
+  final String? elderlyUsername;
+  final int? intervalMinutes;
 
-  String get doseId => '$name::$timeLabel';
+  String get doseId {
+    final m = minutesOfDay;
+    if (m == null) return '$name::$timeLabel';
+    final hh = (m ~/ 60).toString().padLeft(2, '0');
+    final mm = (m % 60).toString().padLeft(2, '0');
+    return '${name.toLowerCase()}_$hh$mm';
+  }
 }
 
 class _PetPickerDialog extends StatelessWidget {

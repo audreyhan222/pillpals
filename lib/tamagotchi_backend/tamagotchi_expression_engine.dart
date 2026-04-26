@@ -16,6 +16,7 @@ class TamagotchiExpressionEngine {
 
   TamagotchiDailyState get state => _state;
   PalExpression get expression => _state.expression;
+  double get happiness => _state.happiness;
 
   void setExpectedDoseCount(int count) {
     _ensureToday();
@@ -49,6 +50,7 @@ class TamagotchiExpressionEngine {
   void registerDoseTaken({
     required String doseId,
     DateTime? at,
+    double happinessDelta = 0.0,
   }) {
     _ensureToday();
     final now = at ?? _now();
@@ -61,14 +63,45 @@ class TamagotchiExpressionEngine {
         notificationAt: now,
         takenAt: now,
       );
-      _state = _state.copyWith(events: updated);
+      _state = _state.copyWith(
+        events: updated,
+        happinessOffset: _state.happinessOffset + happinessDelta,
+      );
       _recomputeExpression(now: now);
       return;
     }
 
     final updated = Map<String, DoseEvent>.from(_state.events);
     updated[doseId] = existing.copyWith(takenAt: now, missed: false);
-    _state = _state.copyWith(events: updated);
+    _state = _state.copyWith(
+      events: updated,
+      happinessOffset: _state.happinessOffset + happinessDelta,
+    );
+    _recomputeExpression(now: now);
+  }
+
+  /// Called when the +5 minute (missed) notification is triggered.
+  /// Drops happiness by 25% immediately.
+  void applyMissedReminderPenalty() {
+    applyHappinessPenalty(0.25);
+  }
+
+  /// Drops happiness by [amount01] (0..1) immediately.
+  void applyHappinessPenalty(double amount01) {
+    _ensureToday();
+    final now = _now();
+    final current = _clamp01(_baseHappiness01(now) + _state.happinessOffset);
+    final newHappiness = _clamp01(current - amount01);
+    _state = _state.copyWith(happinessOffset: newHappiness - _baseHappiness01(now));
+    _recomputeExpression(now: now);
+  }
+
+  void applyHappinessDelta(double delta) {
+    _ensureToday();
+    final now = _now();
+    final current = _clamp01(_baseHappiness01(now) + _state.happinessOffset);
+    final newHappiness = _clamp01(current + delta);
+    _state = _state.copyWith(happinessOffset: newHappiness - _baseHappiness01(now));
     _recomputeExpression(now: now);
   }
 
@@ -93,7 +126,9 @@ class TamagotchiExpressionEngine {
 
   void tick() {
     _ensureToday();
-    _recomputeExpression();
+    final now = _now();
+    _applyOverduePenalties(now);
+    _recomputeExpression(now: now);
   }
 
   void _ensureToday() {
@@ -107,6 +142,9 @@ class TamagotchiExpressionEngine {
   void _recomputeExpression({DateTime? now}) {
     final currentTime = now ?? _now();
     final events = _state.events.values;
+
+    final happiness = _clamp01(_baseHappiness01(currentTime) + _state.happinessOffset);
+    _state = _state.copyWith(happiness: happiness);
 
     // Rule: any fully missed dose keeps expression depressed for the day.
     final hasMissedDose = events.any((event) => event.missed);
@@ -146,8 +184,13 @@ class TamagotchiExpressionEngine {
       return;
     }
 
-    // Default: neutral, and every new day starts from neutral.
-    _state = _state.copyWith(expression: PalExpression.neutral, clearSadUntil: true);
+    final expr = switch (happiness) {
+      >= 0.85 => PalExpression.happy,
+      >= 0.55 => PalExpression.neutral,
+      >= 0.30 => PalExpression.sad,
+      _ => PalExpression.depressed,
+    };
+    _state = _state.copyWith(expression: expr, clearSadUntil: true);
   }
 
   bool _tookAllExpectedDoses() {
@@ -163,5 +206,55 @@ class TamagotchiExpressionEngine {
     if (takenEvents.isEmpty) return false;
 
     return takenEvents.every((event) => event.delayAfterNotification! <= const Duration(minutes: 20));
+  }
+
+  /// Baseline mood if the user is **not** offsetting with on-time doses.
+  /// Starts at neutral (~55% bar); by late evening the base line alone is **well
+  /// below half** of that start (>50% relative drop) — [happinessOffset] from
+  /// taking pills on time pulls the pal back up.
+  double _baseHappiness01(DateTime t) {
+    final dayStart = DateTime(t.year, t.month, t.day);
+    final elapsedSec = t.difference(dayStart).inSeconds.clamp(0, 86400);
+    final frac = elapsedSec / 86400.0;
+    final eased = 1.0 - ((1.0 - frac) * (1.0 - frac)); // easeOutQuad
+    const startNeutral = 0.55; // ~55% at local day start; matches neutral band
+    // ~20% at day end: (0.55-0.20)/0.55 ≈ 64% drop from morning baseline
+    // (i.e. more than 50% unless happinessOffset from on-time usage lifts it).
+    const endOfDay = 0.20;
+    return _clamp01(startNeutral - (startNeutral - endOfDay) * eased);
+  }
+
+  double _clamp01(double v) => v < 0 ? 0 : (v > 1 ? 1 : v);
+
+  void _applyOverduePenalties(DateTime now) {
+    // Applies the +5m (-0.25) and +10m (-0.30) penalties while the app is running.
+    // (Local notifications cannot run app logic at fire-time if the app is closed.)
+    var happiness = _clamp01(_baseHappiness01(now) + _state.happinessOffset);
+    final p5 = Set<String>.from(_state.penalized5m);
+    final p10 = Set<String>.from(_state.penalized10m);
+
+    for (final e in _state.events.values) {
+      if (e.takenAt != null) continue;
+      if (e.missed) continue;
+      final doseId = e.doseId;
+      final five = e.notificationAt.add(const Duration(minutes: 5));
+      final ten = e.notificationAt.add(const Duration(minutes: 10));
+
+      if (!p5.contains(doseId) && now.isAfter(five)) {
+        happiness = _clamp01(happiness - 0.25);
+        p5.add(doseId);
+      }
+      if (!p10.contains(doseId) && now.isAfter(ten)) {
+        happiness = _clamp01(happiness - 0.30);
+        p10.add(doseId);
+      }
+    }
+
+    final newOffset = happiness - _baseHappiness01(now);
+    _state = _state.copyWith(
+      happinessOffset: newOffset,
+      penalized5m: p5,
+      penalized10m: p10,
+    );
   }
 }

@@ -9,13 +9,16 @@ class TamagotchiTimerService {
     required TamagotchiExpressionEngine engine,
     Duration tickInterval = const Duration(minutes: 1),
     void Function(PalExpression expression)? onExpressionChanged,
+    void Function()? onTick,
   })  : _engine = engine,
         _tickInterval = tickInterval,
-        _onExpressionChanged = onExpressionChanged;
+        _onExpressionChanged = onExpressionChanged,
+        _onTick = onTick;
 
   final TamagotchiExpressionEngine _engine;
   final Duration _tickInterval;
   final void Function(PalExpression expression)? _onExpressionChanged;
+  final void Function()? _onTick;
 
   Timer? _timer;
   PalExpression? _lastExpression;
@@ -27,6 +30,7 @@ class TamagotchiTimerService {
     _timer?.cancel();
     _timer = Timer.periodic(_tickInterval, (_) {
       _engine.tick();
+      _onTick?.call();
       _emitIfChanged();
     });
   }
