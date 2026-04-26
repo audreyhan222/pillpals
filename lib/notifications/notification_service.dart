@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 
@@ -12,27 +14,106 @@ import '../api/api_client.dart';
 import '../api/endpoints.dart';
 import '../config/app_config.dart';
 
+@immutable
+class NotificationEvent {
+  const NotificationEvent({required this.payload, required this.actionId});
+
+  final String? payload;
+  final String? actionId;
+}
+
+@immutable
+class DoseReminderPayload {
+  const DoseReminderPayload({
+    required this.doseId,
+    required this.medicationName,
+    required this.scheduledEpochMs,
+    required this.stage,
+  });
+
+  final String doseId;
+  final String medicationName;
+  final int scheduledEpochMs;
+  final int stage;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'doseId': doseId,
+        'medicationName': medicationName,
+        'scheduledEpochMs': scheduledEpochMs,
+        'stage': stage,
+      };
+
+  String encode() => jsonEncode(toJson());
+
+  static DoseReminderPayload? tryDecode(String? payload) {
+    if (payload == null || payload.trim().isEmpty) return null;
+    try {
+      final decoded = jsonDecode(payload);
+      if (decoded is! Map) return null;
+      final doseId = decoded['doseId'];
+      final medicationName = decoded['medicationName'];
+      final scheduledEpochMs = decoded['scheduledEpochMs'];
+      final stage = decoded['stage'];
+      if (doseId is! String ||
+          medicationName is! String ||
+          scheduledEpochMs is! int ||
+          stage is! int) {
+        return null;
+      }
+      return DoseReminderPayload(
+        doseId: doseId,
+        medicationName: medicationName,
+        scheduledEpochMs: scheduledEpochMs,
+        stage: stage,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
 class NotificationService {
   NotificationService._();
   static final NotificationService instance = NotificationService._();
 
   final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
 
-  final StreamController<String?> _payloadStream = StreamController<String?>.broadcast();
-  Stream<String?> get payloadStream => _payloadStream.stream;
+  static const String actionTaken = 'TAKEN';
+  static const String actionSnooze10 = 'SNOOZE_10';
+
+  final StreamController<NotificationEvent> _eventStream =
+      StreamController<NotificationEvent>.broadcast();
+  Stream<NotificationEvent> get eventStream => _eventStream.stream;
 
   Future<void> init() async {
     tz.initializeTimeZones();
     await _configureLocalTimeZone();
 
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const iosInit = DarwinInitializationSettings();
+    final iosInit = DarwinInitializationSettings(
+      notificationCategories: [
+        DarwinNotificationCategory(
+          'dose_reminders',
+          actions: [
+            DarwinNotificationAction.plain(
+              actionTaken,
+              'I took it',
+              options: {DarwinNotificationActionOption.authenticationRequired},
+            ),
+            DarwinNotificationAction.plain(
+              actionSnooze10,
+              'Snooze 10 min',
+            ),
+          ],
+        ),
+      ],
+    );
 
-    const settings = InitializationSettings(android: androidInit, iOS: iosInit);
+    final settings = InitializationSettings(android: androidInit, iOS: iosInit);
     await _plugin.initialize(
       settings,
       onDidReceiveNotificationResponse: (resp) {
-        _payloadStream.add(resp.payload);
+        _eventStream.add(NotificationEvent(payload: resp.payload, actionId: resp.actionId));
       },
       onDidReceiveBackgroundNotificationResponse: _onBackgroundResponse,
     );
@@ -115,20 +196,7 @@ class NotificationService {
       1002,
       'Test notification',
       'This is a dev-triggered reminder.',
-      const NotificationDetails(
-        android: AndroidNotificationDetails(
-          'dose_reminders',
-          'Dose reminders',
-          importance: Importance.max,
-          priority: Priority.high,
-        ),
-        iOS: DarwinNotificationDetails(
-          interruptionLevel: InterruptionLevel.timeSensitive,
-          presentAlert: true,
-          presentSound: true,
-          presentBadge: true,
-        ),
-      ),
+      _detailsForStage(stage: 0),
       payload: payload ?? 'dev-test',
     );
   }
@@ -224,22 +292,158 @@ class NotificationService {
       title,
       body,
       scheduled,
-      const NotificationDetails(
-        android: AndroidNotificationDetails(
-          'dose_reminders',
-          'Dose reminders',
-          importance: Importance.max,
-          priority: Priority.high,
-        ),
-        iOS: DarwinNotificationDetails(
-          interruptionLevel: InterruptionLevel.active,
-          presentSound: true,
-        ),
-      ),
+      _detailsForStage(stage: 0),
       payload: payload,
       androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
       matchDateTimeComponents: DateTimeComponents.time,
     );
+  }
+
+  NotificationDetails _detailsForStage({required int stage}) {
+    // Stage 0: normal reminder
+    // Stage 1: time-sensitive + louder intent
+    // Stage 2: full-screen (Android) + critical-style interruption (iOS best-effort)
+    final isEscalated = stage >= 1;
+    final isFullScreen = stage >= 2;
+
+    return NotificationDetails(
+      android: AndroidNotificationDetails(
+        'dose_reminders',
+        'Dose reminders',
+        importance: Importance.max,
+        priority: Priority.high,
+        fullScreenIntent: isFullScreen,
+        category: AndroidNotificationCategory.alarm,
+        actions: const <AndroidNotificationAction>[
+          AndroidNotificationAction(actionTaken, 'I took it'),
+          AndroidNotificationAction(actionSnooze10, 'Snooze 10 min'),
+        ],
+      ),
+      iOS: DarwinNotificationDetails(
+        categoryIdentifier: 'dose_reminders',
+        interruptionLevel: isEscalated
+            ? InterruptionLevel.timeSensitive
+            : InterruptionLevel.active,
+        presentSound: true,
+        presentAlert: true,
+        presentBadge: true,
+      ),
+    );
+  }
+
+  int _doseNotificationId({
+    required String doseId,
+    required int stage,
+  }) {
+    // Stable 31-bit positive int id.
+    final raw = doseId.hashCode ^ (stage * 9973);
+    return raw.abs() % 2147483647;
+  }
+
+  /// Escalation protocol (local/on-device):
+  /// - stage 0 at scheduled time
+  /// - stage 1 at +5 minutes
+  /// - stage 2 at +15 minutes
+  ///
+  /// These are one-shot notifications for the next occurrence of [time] (today or tomorrow).
+  Future<void> scheduleEscalatingDoseReminder({
+    required String doseId,
+    required String medicationName,
+    required String dosageText,
+    required TimeOfDay time,
+  }) async {
+    final now = tz.TZDateTime.now(tz.local);
+    var scheduled = tz.TZDateTime(
+      tz.local,
+      now.year,
+      now.month,
+      now.day,
+      time.hour,
+      time.minute,
+    );
+    if (scheduled.isBefore(now)) {
+      scheduled = scheduled.add(const Duration(days: 1));
+    }
+
+    const offsets = <Duration>[
+      Duration(minutes: 0),
+      Duration(minutes: 5),
+      Duration(minutes: 15),
+    ];
+
+    for (int stage = 0; stage < offsets.length; stage++) {
+      final when = scheduled.add(offsets[stage]);
+      final payload = DoseReminderPayload(
+        doseId: doseId,
+        medicationName: medicationName,
+        scheduledEpochMs: scheduled.millisecondsSinceEpoch,
+        stage: stage,
+      ).encode();
+
+      await _plugin.zonedSchedule(
+        _doseNotificationId(doseId: doseId, stage: stage),
+        stage == 0 ? medicationName : 'Missed dose: $medicationName',
+        dosageText.isEmpty
+            ? 'Time to take your dose. Tap “I took it” when done.'
+            : 'Time to take $dosageText. Tap “I took it” when done.',
+        when,
+        _detailsForStage(stage: stage),
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        payload: payload,
+      );
+    }
+  }
+
+  Future<void> showCaregiverEscalationNow({
+    required String elderlyUsername,
+    required String medicationName,
+    required String dosageText,
+    required String doseId,
+    required int stage,
+  }) async {
+    final title = 'Escalation: $medicationName';
+    final body = dosageText.isEmpty
+        ? 'Dose missed by $elderlyUsername. Tap to view.'
+        : 'Dose missed by $elderlyUsername: $dosageText';
+    final payload = DoseReminderPayload(
+      doseId: doseId,
+      medicationName: '$medicationName ($elderlyUsername)',
+      scheduledEpochMs: DateTime.now().millisecondsSinceEpoch,
+      stage: stage,
+    ).encode();
+
+    await _plugin.show(
+      _doseNotificationId(doseId: doseId, stage: 10 + stage),
+      title,
+      body,
+      _detailsForStage(stage: stage),
+      payload: payload,
+    );
+  }
+
+  Future<void> writeDoseAcknowledgementToFirestore({
+    required String elderlyUsername,
+    required String doseId,
+    required int scheduledEpochMs,
+  }) async {
+    final u = elderlyUsername.trim();
+    if (u.isEmpty) return;
+    await FirebaseFirestore.instance
+        .collection('elderly')
+        .doc(u)
+        .collection('doseAcks')
+        .doc(doseId)
+        .set(<String, dynamic>{
+      'doseId': doseId,
+      'scheduledEpochMs': scheduledEpochMs,
+      'ackAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  Future<void> cancelEscalationSeries({required String doseId}) async {
+    for (int stage = 0; stage < 3; stage++) {
+      await _plugin.cancel(_doseNotificationId(doseId: doseId, stage: stage));
+    }
   }
 
   Future<void> cancelReminder(int id) => _plugin.cancel(id);

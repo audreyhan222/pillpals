@@ -116,6 +116,7 @@ class ElderlyMedicationCatalogRepository {
     required int totalLeft,
     required String dosageAmount,
     required String dosageSchedule,
+    List<int>? timesMinutes,
   }) async {
     final trimmedName = name.trim();
     if (trimmedName.isEmpty) {
@@ -131,6 +132,7 @@ class ElderlyMedicationCatalogRepository {
         'totalLeft': totalLeft,
         'dosageAmount': dosageAmount.trim(),
         'dosageSchedule': dosageSchedule.trim(),
+        if (timesMinutes != null) 'timesMinutes': timesMinutes,
         'updatedAt': FieldValue.serverTimestamp(),
         'createdAt': FieldValue.serverTimestamp(),
       },

@@ -26,6 +26,7 @@ class MedicationRepository {
     if (role == 'elderly' && username != null && username.isNotEmpty) {
       final times = details.times.toList()
         ..sort((a, b) => (a.hour * 60 + a.minute).compareTo(b.hour * 60 + b.minute));
+      final timesMinutes = times.map((t) => t.hour * 60 + t.minute).toList();
       final schedule = times.isEmpty
           ? ''
           : 'Daily at ${times.map((t) => t.format(context)).join(', ')}';
@@ -37,6 +38,7 @@ class MedicationRepository {
         totalLeft: 0,
         dosageAmount: details.dosage,
         dosageSchedule: schedule,
+        timesMinutes: timesMinutes,
       );
       return;
     }

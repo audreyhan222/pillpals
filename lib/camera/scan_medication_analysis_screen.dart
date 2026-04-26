@@ -232,16 +232,13 @@ class _ScanMedicationAnalysisScreenState extends State<ScanMedicationAnalysisScr
                         // Schedule one daily reminder per time.
                         for (int i = 0; i < details.times.length; i++) {
                           final t = details.times[i];
-                          // Notification IDs must be stable ints. This is a simple deterministic mapping.
-                          final id = details.name.hashCode ^ (t.hour * 60 + t.minute);
-                          await NotificationService.instance.scheduleDailyDoseReminder(
-                            id: id.abs() % 2147483647,
+                          final name = details.name.isEmpty ? 'Medication' : details.name;
+                          final doseId = '${name.toLowerCase()}_${t.hour.toString().padLeft(2, '0')}${t.minute.toString().padLeft(2, '0')}';
+                          await NotificationService.instance.scheduleEscalatingDoseReminder(
+                            doseId: doseId,
+                            medicationName: name,
+                            dosageText: details.dosage,
                             time: t,
-                            title: details.name.isEmpty ? 'Medication reminder' : details.name,
-                            body: details.dosage.isEmpty
-                                ? 'Time to take your dose.'
-                                : 'Time to take ${details.dosage}.',
-                            payload: details.name,
                           );
                         }
 
